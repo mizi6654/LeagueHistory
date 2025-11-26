@@ -42,13 +42,21 @@ namespace League
             penalGameMatchData = new Panel();
             tableLayoutPanel1 = new TableLayoutPanel();
             tabPage3 = new TabPage();
-            linkLabel1 = new LinkLabel();
+            tabControl1 = new TabControl();
+            tabPage4 = new TabPage();
+            tabPage5 = new TabPage();
+            checkBox1 = new CheckBox();
+            checkBox2 = new CheckBox();
+            label2 = new Label();
+            lkbPreliminary = new LinkLabel();
             panel1.SuspendLayout();
             imageTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
             tabPage2.SuspendLayout();
             penalGameMatchData.SuspendLayout();
             tabPage3.SuspendLayout();
+            tabControl1.SuspendLayout();
+            tabPage4.SuspendLayout();
             SuspendLayout();
             // 
             // panel1
@@ -170,7 +178,7 @@ namespace League
             // 
             // tabPage3
             // 
-            tabPage3.Controls.Add(linkLabel1);
+            tabPage3.Controls.Add(tabControl1);
             tabPage3.Location = new Point(54, 4);
             tabPage3.Name = "tabPage3";
             tabPage3.Size = new Size(1175, 800);
@@ -178,15 +186,80 @@ namespace League
             tabPage3.Text = "tabPage3";
             tabPage3.UseVisualStyleBackColor = true;
             // 
-            // linkLabel1
+            // tabControl1
             // 
-            linkLabel1.AutoSize = true;
-            linkLabel1.Location = new Point(3, 4);
-            linkLabel1.Name = "linkLabel1";
-            linkLabel1.Size = new Size(44, 17);
-            linkLabel1.TabIndex = 0;
-            linkLabel1.TabStop = true;
-            linkLabel1.Text = "等开发";
+            tabControl1.Controls.Add(tabPage4);
+            tabControl1.Controls.Add(tabPage5);
+            tabControl1.Dock = DockStyle.Fill;
+            tabControl1.Location = new Point(0, 0);
+            tabControl1.Name = "tabControl1";
+            tabControl1.SelectedIndex = 0;
+            tabControl1.Size = new Size(1175, 800);
+            tabControl1.TabIndex = 0;
+            // 
+            // tabPage4
+            // 
+            tabPage4.Controls.Add(lkbPreliminary);
+            tabPage4.Controls.Add(label2);
+            tabPage4.Controls.Add(checkBox2);
+            tabPage4.Controls.Add(checkBox1);
+            tabPage4.Location = new Point(4, 26);
+            tabPage4.Name = "tabPage4";
+            tabPage4.Padding = new Padding(3);
+            tabPage4.Size = new Size(1167, 770);
+            tabPage4.TabIndex = 0;
+            tabPage4.Text = "功能";
+            tabPage4.UseVisualStyleBackColor = true;
+            // 
+            // tabPage5
+            // 
+            tabPage5.Location = new Point(4, 26);
+            tabPage5.Name = "tabPage5";
+            tabPage5.Padding = new Padding(3);
+            tabPage5.Size = new Size(1167, 770);
+            tabPage5.TabIndex = 1;
+            tabPage5.Text = "tabPage5";
+            tabPage5.UseVisualStyleBackColor = true;
+            // 
+            // checkBox1
+            // 
+            checkBox1.AutoSize = true;
+            checkBox1.Location = new Point(17, 16);
+            checkBox1.Name = "checkBox1";
+            checkBox1.Size = new Size(183, 21);
+            checkBox1.TabIndex = 1;
+            checkBox1.Text = "游戏结束快速退出返回客户端";
+            checkBox1.UseVisualStyleBackColor = true;
+            // 
+            // checkBox2
+            // 
+            checkBox2.AutoSize = true;
+            checkBox2.Location = new Point(17, 52);
+            checkBox2.Name = "checkBox2";
+            checkBox2.Size = new Size(231, 21);
+            checkBox2.TabIndex = 3;
+            checkBox2.Text = "选英雄阶段玩家列表是否筛选对战信息";
+            checkBox2.UseVisualStyleBackColor = true;
+            // 
+            // label2
+            // 
+            label2.AutoSize = true;
+            label2.Location = new Point(17, 94);
+            label2.Name = "label2";
+            label2.Size = new Size(80, 17);
+            label2.TabIndex = 4;
+            label2.Text = "预选期望英雄";
+            // 
+            // lkbPreliminary
+            // 
+            lkbPreliminary.AutoSize = true;
+            lkbPreliminary.Location = new Point(120, 94);
+            lkbPreliminary.Name = "lkbPreliminary";
+            lkbPreliminary.Size = new Size(56, 17);
+            lkbPreliminary.TabIndex = 5;
+            lkbPreliminary.TabStop = true;
+            lkbPreliminary.Text = "点击选择";
+            lkbPreliminary.LinkClicked += lkbPreliminary_LinkClicked;
             // 
             // FormMain
             // 
@@ -197,7 +270,7 @@ namespace League
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "League v1.0.3";
+            Text = "League v1.0.4";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
             imageTabControl1.ResumeLayout(false);
@@ -206,7 +279,9 @@ namespace League
             tabPage2.ResumeLayout(false);
             penalGameMatchData.ResumeLayout(false);
             tabPage3.ResumeLayout(false);
-            tabPage3.PerformLayout();
+            tabControl1.ResumeLayout(false);
+            tabPage4.ResumeLayout(false);
+            tabPage4.PerformLayout();
             ResumeLayout(false);
         }
 
@@ -219,9 +294,15 @@ namespace League
         private TabPage tabPage1;
         private TabPage tabPage2;
         private TabPage tabPage3;
-        private LinkLabel linkLabel1;
         private Panel panelMatchList;
         private TableLayoutPanel tableLayoutPanel1;
         private Panel penalGameMatchData;
+        private TabControl tabControl1;
+        private TabPage tabPage4;
+        private TabPage tabPage5;
+        private CheckBox checkBox1;
+        private CheckBox checkBox2;
+        private LinkLabel lkbPreliminary;
+        private Label label2;
     }
 }

@@ -1,6 +1,4 @@
-﻿using Newtonsoft.Json.Linq;
-using System.Diagnostics;
-using static League.FormMain;
+﻿using System.Diagnostics;
 
 namespace League.model
 {

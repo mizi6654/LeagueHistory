@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 namespace League.model
 {
@@ -129,6 +125,9 @@ namespace League.model
             PrimaryRuneDescriptions = new string[4];
             SecondaryRuneNames = new string[2];
             SecondaryRuneDescriptions = new string[2];
+
+            // 初始化 Augments 数组
+            Augments = Array.Empty<RuneInfo>();
         }
 
         public void Dispose()
@@ -193,10 +192,31 @@ namespace League.model
                     item3?.Avatar?.Dispose();
                 }
             }
+            // 释放所有玩家的海克斯符文
+            if (AllPlayersAugments != null)
+            {
+                foreach (var augments in AllPlayersAugments.Values)
+                {
+                    if (augments != null)
+                    {
+                        foreach (var augment in augments)
+                        {
+                            augment?.Icon?.Dispose();
+                        }
+                    }
+                }
+                AllPlayersAugments.Clear();
+            }
             SelfPlayer?.Avatar?.Dispose();
             RawGameData = null;
             AllParticipants = null;
             GC.SuppressFinalize(this);
         }
+
+        // 海克斯大乱斗符文
+        public RuneInfo[] Augments { get; set; } = Array.Empty<RuneInfo>();
+
+        // 新增：所有玩家的海克斯符文，按puuid索引
+        public Dictionary<string, RuneInfo[]> AllPlayersAugments { get; set; } = new Dictionary<string, RuneInfo[]>();
     }
 }

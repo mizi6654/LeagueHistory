@@ -720,7 +720,7 @@ namespace League
         {
             _watcherCts?.Cancel();
         }
-        
+
 
         #region 创建英雄卡片
         private async Task CreateBasicCardsOnly(JArray team, bool isMyTeam, int row)
@@ -1426,10 +1426,22 @@ namespace League
             if (tagList.Contains("q_440")) return "灵活组排";
             if (tagList.Contains("q_430")) return "匹配";
             if (tagList.Contains("q_400")) return "匹配(征召)";
-            if (tagList.Contains("q_830") || tagList.Contains("q_840") || tagList.Contains("q_850"))
-                return "人机对战";
+            if (tagList.Contains("q_830") || tagList.Contains("q_840") || tagList.Contains("q_850")) return "人机对战";
+            if (tagList.Contains("q_950") || tagList.Contains("q_960")) return "末日人机";
             if (tagList.Contains("q_900")) return "无限火力";
             if (tagList.Contains("q_1020")) return "克隆大作战";
+            if (tagList.Contains("q_1700")) return "斗魂竞技场";
+            if (tagList.Contains("q_1300")) return "极限闪击";
+            if (tagList.Contains("q_1400")) return "终极魔典";
+            if (tagList.Contains("q_1900")) return "快速模式";
+            if (tagList.Contains("q_2000") || tagList.Contains("q_2010") || tagList.Contains("q_2020")) return "神木之门";
+            if (tagList.Contains("q_700") || tagList.Contains("q_720") || tagList.Contains("q_740") || tagList.Contains("q_750")) return "云顶之弈";
+            if (tagList.Contains("q_1090")) return "云顶之弈(快速)";
+            if (tagList.Contains("q_1100")) return "云顶之弈(排位)";
+            if (tagList.Contains("q_610")) return "联盟战棋";
+            if (tagList.Contains("q_100")) return "魄罗大乱斗";
+            if (tagList.Contains("q_1200")) return "闪击模式";
+            if (tagList.Contains("q_2400")) return "海克斯乱斗";
 
             // fallback
             return string.Join(",", tagList);
@@ -1535,7 +1547,7 @@ namespace League
         //}
 
         #endregion
-        
+
         #region UI更新处理
 
         /// <summary>
@@ -1736,7 +1748,7 @@ namespace League
 
             // 2️⃣ 发起网络请求
             var allGames = await Globals.sgpClient.SgpFetchLatestMatches(puuid, begIndex, pageSize, queueId);
-
+            //Debug.WriteLine(allGames);
             // 4️⃣ 写入缓存
             MatchCache.Add(puuid, queueId, begIndex, pageSize, allGames);
 
@@ -1827,19 +1839,19 @@ namespace League
             return panel;
             static bool IsReplaySupported(string queueTag)
             {
-                string[] replayAllowed = new string[12]
+                string[] replayAllowed = new string[13]
                 {
                     "q_400", "q_420", "q_430", "q_440", "q_450", "q_830", "q_840", "q_850", "q_900", "q_1010",
-                    "q_1020", "q_1900"
+                    "q_1020", "q_1900", "q_2400"
                 };
                 return replayAllowed.Contains(queueTag);
             }
             static bool IsSummonersRiftOrAram(string queueTag)
             {
-                string[] allowed = new string[12]
+                string[] allowed = new string[13]
                 {
                     "q_400", "q_420", "q_430", "q_440", "q_450", "q_830", "q_840", "q_850", "q_900", "q_1010",
-                    "q_1020", "q_1900"
+                    "q_1020", "q_1900", "q_2400"
                 };
                 return allowed.Contains(queueTag);
             }
@@ -2221,5 +2233,11 @@ namespace League
         }
 
         #endregion
+
+        private void lkbPreliminary_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            Preliminary pre = new Preliminary();
+            pre.ShowDialog();
+        }
     }
 }

@@ -1,13 +1,6 @@
-﻿#define DEBUG
-using System;
+﻿using Newtonsoft.Json.Linq;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Windows.Forms;
-using Newtonsoft.Json.Linq;
 
 namespace League.model
 {
@@ -22,7 +15,9 @@ namespace League.model
             public string Description { get; set; }
         }
 
-        private const int MAX_CONCURRENT_PARSING = 5;
+        private const int MAX_CONCURRENT_PARSING = 10;  // 增加到10
+
+        private static readonly SemaphoreSlim _semaphore = new SemaphoreSlim(MAX_CONCURRENT_PARSING, MAX_CONCURRENT_PARSING);
 
         private static int _currentParsingCount;
 
@@ -70,28 +65,24 @@ namespace League.model
             return bmp;
         }
 
+        // 修改解析方法，使用 SemaphoreSlim 替代 lock
         public async Task<Panel> ParseGameToPanelFromSgpAsync(JObject game, string gameName, string tagLine, int index)
         {
-            lock (_lockObject)
-            {
-                if (_currentParsingCount >= 5)
-                {
-                    Debug.WriteLine($"达到最大并发解析数: {_currentParsingCount}，跳过本次解析");
-                    return CreateEmptyPanel();
-                }
-                _currentParsingCount++;
-            }
+            // 使用 SemaphoreSlim 控制并发，而不是直接跳过
+            await _semaphore.WaitAsync();
             try
             {
                 if (game == null)
                 {
                     return CreateEmptyPanel();
                 }
+
                 MatchInfo matchInfo = await ParseGameDataLightweight(game, gameName, tagLine, index);
                 if (matchInfo == null)
                 {
                     return CreateEmptyPanel();
                 }
+
                 MatchListPanel panel = new MatchListPanel(matchInfo);
                 panel.PlayerIconClicked += delegate (string summonerId)
                 {
@@ -101,18 +92,14 @@ namespace League.model
             }
             catch (Exception ex)
             {
-                Exception ex2 = ex;
-                Debug.WriteLine($"解析异常: {ex2}");
+                Debug.WriteLine($"解析异常: {ex}");
                 return CreateEmptyPanel();
             }
             finally
             {
                 game?.RemoveAll();
                 game = null;
-                lock (_lockObject)
-                {
-                    _currentParsingCount--;
-                }
+                _semaphore.Release();
             }
         }
 
@@ -158,7 +145,12 @@ namespace League.model
             _ = tuple3.Item1;
             string damageTakenText = tuple3.Item2;
             (Image champIcon, string champName, Image spellImg1, Image spellImg2, string spellName1, string spellDesc1, string spellName2, string spellDesc2, RuneInfo[] primaryRunes, RuneInfo[] secondaryRunes, RuneInfo[] statRunes, Item[] items) resources = await LoadEssentialResourcesSimple(selfParticipant);
-            MatchInfo matchInfo = CreateMatchInfo(index, gameId, currPuuid, currSummonerId, isWin, teamId, duration, createTime, kills, deaths, assists, $"{(float)damageToChampions / 1000f:0.#}K |{damageRank}", $"{(float)goldEarned / 1000f:0.#}K |{goldRank}", $"{killParticipation:P0} |{kpRank}", damageTakenText, mode, queueId, resources.champIcon, resources.champName, resources.spellImg1, resources.spellImg2, resources.primaryRunes, resources.secondaryRunes, resources.statRunes, resources.items, gameName.Contains("#") ? gameName.Substring(0, gameName.IndexOf('#')) : gameName, game, allParticipants);
+
+            // 修改：加载所有玩家的海克斯符文
+            var allPlayersAugments = await LoadAllPlayersAugmentsAsync(allParticipants);
+            var selfAugments = allPlayersAugments.ContainsKey(currPuuid) ? allPlayersAugments[currPuuid] : Array.Empty<RuneInfo>();
+
+            MatchInfo matchInfo = CreateMatchInfo(index, gameId, currPuuid, currSummonerId, isWin, teamId, duration, createTime, kills, deaths, assists, $"{(float)damageToChampions / 1000f:0.#}K |{damageRank}", $"{(float)goldEarned / 1000f:0.#}K |{goldRank}", $"{killParticipation:P0} |{kpRank}", damageTakenText, mode, queueId, resources.champIcon, resources.champName, resources.spellImg1, resources.spellImg2, resources.primaryRunes, resources.secondaryRunes, resources.statRunes, resources.items, gameName.Contains("#") ? gameName.Substring(0, gameName.IndexOf('#')) : gameName, game, allParticipants, selfAugments, allPlayersAugments);
             matchInfo.SpellNames[0] = resources.spellName1;
             matchInfo.SpellDescriptions[0] = resources.spellDesc1;
             matchInfo.SpellNames[1] = resources.spellName2;
@@ -166,6 +158,102 @@ namespace League.model
             await LoadTeamMembers(matchInfo, allParticipants, gameName, tagLine);
             return matchInfo;
         }
+
+        //添加一个方法来加载所有玩家的海克斯符文
+        private async Task<Dictionary<string, RuneInfo[]>> LoadAllPlayersAugmentsAsync(List<JObject> allParticipants)
+        {
+            var allAugments = new Dictionary<string, RuneInfo[]>();
+
+            // 使用信号量限制并发数
+            var semaphore = new SemaphoreSlim(5);
+            var tasks = allParticipants.Select(async participant =>
+            {
+                await semaphore.WaitAsync();
+                try
+                {
+                    string puuid = participant["puuid"]?.ToString();
+                    if (!string.IsNullOrEmpty(puuid))
+                    {
+                        int[] augmentIds = ExtractAugments(participant);
+                        var augments = await LoadAugmentsAsync(augmentIds);
+                        allAugments[puuid] = augments;
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+            return allAugments;
+        }
+
+        // 修改海克斯符文加载方法，确保正确处理空值
+        private async Task<RuneInfo[]> LoadAugmentsAsync(int[] augmentIds)
+        {
+            if (augmentIds == null || augmentIds.Length == 0)
+            {
+                return Array.Empty<RuneInfo>();
+            }
+
+            // 使用并发加载，但限制并发数避免过多网络请求
+            var semaphore = new SemaphoreSlim(3); // 限制同时下载3个图标
+            var tasks = augmentIds.Where(id => id > 0).Select(async id =>
+            {
+                await semaphore.WaitAsync();
+                try
+                {
+                    var (img, name, desc) = await FormMain.Globals.resLoading.GetAugmentInfoAsync(id);
+                    if (img != null)
+                    {
+                        return new RuneInfo
+                        {
+                            id = id,
+                            Icon = img,
+                            name = name,
+                            longDesc = desc
+                        };
+                    }
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"加载海克斯符文 {id} 失败: {ex.Message}");
+                    return null;
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+            return results.Where(r => r != null).ToArray();
+        }
+        
+
+        // 修改 ExtractAugments 方法，确保正确处理空值
+        private int[] ExtractAugments(JObject participant)
+        {
+            if (participant == null)
+            {
+                return Array.Empty<int>();
+            }
+
+            int[] augIds = new int[]
+            {
+                participant["playerAugment1"]?.Value<int>() ?? 0,
+                participant["playerAugment2"]?.Value<int>() ?? 0,
+                participant["playerAugment3"]?.Value<int>() ?? 0,
+                participant["playerAugment4"]?.Value<int>() ?? 0,
+                participant["playerAugment5"]?.Value<int>() ?? 0,
+                participant["playerAugment6"]?.Value<int>() ?? 0
+            };
+
+            return augIds.Where(x => x > 0).ToArray();
+        }
+
 
         private (JObject gameJson, JArray participants) ParseJsonStructure(JObject game)
         {
@@ -307,10 +395,10 @@ namespace League.model
                     mode = "云顶之弈";
                     break;
                 case 1090:
-                    mode = "云顶之弈(快速)";
+                    mode = "云顶(快速)";
                     break;
                 case 1100:
-                    mode = "云顶之弈(排位)";
+                    mode = "云顶(排位)";
                     break;
                 case 610:
                     mode = "联盟战棋";
@@ -323,6 +411,9 @@ namespace League.model
                     break;
                 case 1200:
                     mode = "闪击模式";
+                    break;
+                case 2400:
+                    mode = "海克斯乱斗";
                     break;
                 case 0:
                     if (!string.IsNullOrEmpty(gameMode))
@@ -700,7 +791,7 @@ namespace League.model
             return false;
         }
 
-        private MatchInfo CreateMatchInfo(int index, long gameId, string currPuuid, string currSummonerId, bool isWin, int teamId, int duration, DateTime createTime, int kills, int deaths, int assists, string damageText, string goldText, string kpText, string damageTakenText, string mode, string queueId, Image champIcon, string champName, Image spellImg1, Image spellImg2, RuneInfo[] primaryRunes, RuneInfo[] secondaryRunes, RuneInfo[] statRunes, Item[] items, string selfName, JObject rawGameData, List<JObject> allParticipants)
+        private MatchInfo CreateMatchInfo(int index, long gameId, string currPuuid, string currSummonerId, bool isWin, int teamId, int duration, DateTime createTime, int kills, int deaths, int assists, string damageText, string goldText, string kpText, string damageTakenText, string mode, string queueId, Image champIcon, string champName, Image spellImg1, Image spellImg2, RuneInfo[] primaryRunes, RuneInfo[] secondaryRunes, RuneInfo[] statRunes, Item[] items, string selfName, JObject rawGameData, List<JObject> allParticipants, RuneInfo[] augments, Dictionary<string, RuneInfo[]> allPlayersAugments)
         {
             MatchInfo matchInfo = new MatchInfo();
             matchInfo.Index = index;
@@ -725,6 +816,8 @@ namespace League.model
             matchInfo.Items = items ?? new Item[0];
             matchInfo.PrimaryRunes = primaryRunes ?? new RuneInfo[0];
             matchInfo.SecondaryRunes = secondaryRunes ?? new RuneInfo[0];
+            matchInfo.Augments = augments ?? Array.Empty<RuneInfo>();  // 当前玩家的海克斯符文
+            matchInfo.AllPlayersAugments = allPlayersAugments ?? new Dictionary<string, RuneInfo[]>(); // 所有玩家的海克斯符文
             matchInfo.StatRunes = statRunes ?? new RuneInfo[3];
             matchInfo.BlueTeam = new List<PlayerInfo>();
             matchInfo.RedTeam = new List<PlayerInfo>();

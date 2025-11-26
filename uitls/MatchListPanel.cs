@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Text.RegularExpressions;
-using System.Windows.Forms;
+﻿using System.Text.RegularExpressions;
 using League.model;
 
 namespace League
@@ -162,46 +158,101 @@ namespace League
             string kdaText = $"{MatchInfo.Kills} / {MatchInfo.Deaths} / {MatchInfo.Assists}";
             g.DrawString(kdaText, primaryFont, Brushes.DarkSlateGray, 280f, headerY - 2);
             int runeY = headerY + 30 - 34;
-            for (int j = 0; j < 6; j++)
+            
+
+            //新增海克斯符文判断
+            // 判断是否为海克斯大乱斗模式
+            bool isHextechArena = MatchInfo.Mode?.Contains("海克斯") == true ||
+                                 MatchInfo.QueueId == "q_2400";
+
+            if (isHextechArena && MatchInfo.Augments != null && MatchInfo.Augments.Length > 0)
             {
-                int x = 470 + j * 34;
-                Rectangle rect = new Rectangle(x, runeY, 30, 30);
-                using (Pen pen = new Pen(Color.Gray))
+                // 显示海克斯符文
+                for (int j = 0; j < 6; j++)
                 {
-                    g.DrawRectangle(pen, rect);
-                }
-                using (SolidBrush bgBrush2 = new SolidBrush(Color.Black))
-                {
-                    g.FillRectangle(bgBrush2, rect);
-                }
-                Image runeImage = null;
-                if (j < 4 && MatchInfo.PrimaryRunes != null && j < MatchInfo.PrimaryRunes.Length)
-                {
-                    RuneInfo primaryRune = MatchInfo.PrimaryRunes[j];
-                    if (primaryRune != null && primaryRune.Icon != null)
+                    int x = 470 + j * 34;
+                    Rectangle rect = new Rectangle(x, runeY, 30, 30);
+
+                    // 绘制深色背景
+                    using (SolidBrush bgBrush = new SolidBrush(Color.FromArgb(40, 40, 40))) // 深灰色背景
                     {
-                        runeImage = primaryRune.Icon;
+                        g.FillRectangle(bgBrush, rect);
+                    }
+
+                    using (Pen pen = new Pen(Color.Purple, 1f)) // 紫色边框表示海克斯符文
+                    {
+                        g.DrawRectangle(pen, rect);
+                    }
+                    using (SolidBrush bgBrush2 = new SolidBrush(Color.Black))
+                    {
+                        g.FillRectangle(bgBrush2, rect);
+                    }
+
+                    Image runeImage = null;
+                    if (j < MatchInfo.Augments.Length)
+                    {
+                        RuneInfo augment = MatchInfo.Augments[j];
+                        if (augment != null && augment.Icon != null)
+                        {
+                            runeImage = augment.Icon;
+                        }
+                    }
+
+                    if (runeImage != null)
+                    {
+                        g.DrawImage(runeImage, rect);
                     }
                 }
-                else if (j >= 4 && MatchInfo.SecondaryRunes != null && j - 4 < MatchInfo.SecondaryRunes.Length)
+
+            }
+            else
+            {
+                // 显示普通符文（原有逻辑）
+                for (int j = 0; j < 6; j++)
                 {
-                    RuneInfo secondaryRune = MatchInfo.SecondaryRunes[j - 4];
-                    if (secondaryRune != null && secondaryRune.Icon != null)
+                    int x = 470 + j * 34;
+                    Rectangle rect = new Rectangle(x, runeY, 30, 30);
+                    using (Pen pen = new Pen(Color.Gray))
                     {
-                        runeImage = secondaryRune.Icon;
+                        g.DrawRectangle(pen, rect);
                     }
-                }
-                if (runeImage == null)
-                {
-                    continue;
-                }
-                g.DrawImage(runeImage, rect);
-                if (j == 0 && MatchInfo.PrimaryRunes != null && MatchInfo.PrimaryRunes.Length != 0)
-                {
-                    using Pen pen2 = new Pen(Color.Goldenrod, 2f);
-                    g.DrawRectangle(pen2, rect);
+                    using (SolidBrush bgBrush2 = new SolidBrush(Color.Black))
+                    {
+                        g.FillRectangle(bgBrush2, rect);
+                    }
+
+                    Image runeImage = null;
+                    if (j < 4 && MatchInfo.PrimaryRunes != null && j < MatchInfo.PrimaryRunes.Length)
+                    {
+                        RuneInfo primaryRune = MatchInfo.PrimaryRunes[j];
+                        if (primaryRune != null && primaryRune.Icon != null)
+                        {
+                            runeImage = primaryRune.Icon;
+                        }
+                    }
+                    else if (j >= 4 && MatchInfo.SecondaryRunes != null && j - 4 < MatchInfo.SecondaryRunes.Length)
+                    {
+                        RuneInfo secondaryRune = MatchInfo.SecondaryRunes[j - 4];
+                        if (secondaryRune != null && secondaryRune.Icon != null)
+                        {
+                            runeImage = secondaryRune.Icon;
+                        }
+                    }
+
+                    if (runeImage == null)
+                    {
+                        continue;
+                    }
+                    g.DrawImage(runeImage, rect);
+                    if (j == 0 && MatchInfo.PrimaryRunes != null && MatchInfo.PrimaryRunes.Length != 0)
+                    {
+                        using Pen pen2 = new Pen(Color.Goldenrod, 2f);
+                        g.DrawRectangle(pen2, rect);
+                    }
                 }
             }
+            //结束----
+
             Font linkFont = new Font("微软雅黑", 9f, FontStyle.Underline);
             string detailsText = "查看详情数据";
             string replayText = (MatchInfo.IsReplayDownloaded ? "播放回放" : "下载回放");
@@ -389,27 +440,44 @@ namespace League
                 }
             }
             int runeY = 10;
+
+            //根据不同的符文判断显示提示描述
+            bool isHextechArena = MatchInfo.Mode?.Contains("海克斯") == true ||
+                         MatchInfo.QueueId == "q_2400";
             for (int k = 0; k < 6; k++)
             {
                 int x = 470 + k * 34;
                 if (new Rectangle(x, runeY, 30, 30).Contains(e.Location) && tooltipText == null)
                 {
                     RuneInfo rune = null;
-                    if (k < 4 && MatchInfo.PrimaryRunes != null && k < MatchInfo.PrimaryRunes.Length)
+
+                    if (isHextechArena && MatchInfo.Augments != null && k < MatchInfo.Augments.Length)
                     {
-                        rune = MatchInfo.PrimaryRunes[k];
+                        // 海克斯符文提示
+                        rune = MatchInfo.Augments[k];
                     }
-                    else if (k >= 4 && MatchInfo.SecondaryRunes != null && k - 4 < MatchInfo.SecondaryRunes.Length)
+                    else
                     {
-                        rune = MatchInfo.SecondaryRunes[k - 4];
+                        // 普通符文提示
+                        if (k < 4 && MatchInfo.PrimaryRunes != null && k < MatchInfo.PrimaryRunes.Length)
+                        {
+                            rune = MatchInfo.PrimaryRunes[k];
+                        }
+                        else if (k >= 4 && MatchInfo.SecondaryRunes != null && k - 4 < MatchInfo.SecondaryRunes.Length)
+                        {
+                            rune = MatchInfo.SecondaryRunes[k - 4];
+                        }
                     }
+
                     if (rune != null)
                     {
-                        tooltipText = rune.Name + "\n" + StripHtmlTags(rune.Description);
+                        tooltipText = rune.name + "\n" + StripHtmlTags(rune.longDesc ?? rune.Description ?? "");
                     }
                     break;
                 }
             }
+
+
             foreach (Tuple<Rectangle, PlayerInfo> tuple in GetPlayerIconRegions())
             {
                 if (tuple.Item1.Contains(e.Location) && tuple.Item2 != null && tooltipText == null)
