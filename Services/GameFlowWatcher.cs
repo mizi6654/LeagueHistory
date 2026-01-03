@@ -24,14 +24,10 @@ namespace League.Services
         private CancellationTokenSource? _champSelectCts; // 选人阶段专用轮询
 
         // 状态标志
-        private bool _gameEndHandled = false; // 防止重复处理游戏结束
         private bool _champSelectMessageSent = false; // 防止重复启动热键发送战绩
-        private bool _hasAutoPreliminated = false; // 普通模式（匹配/排位）是否已预选过意图
+        private bool _gameEndHandled = false; // 防止重复处理游戏结束
+        private bool _hasAutoPreliminated = false; // 只保留这个标志，用于普通模式的预选（ARAM 不需要停止）
         private bool _hasSwappedInAram = false; // 恢复：ARAM 已抢过英雄标志（每局重置，一抢就停）
-        //private int _userPreferredChampId = 0; // 用户当前偏好的英雄ID（0表示未表达偏好）
-
-        // 新增：自动换英雄的状态容器
-        private AramAutoSwapState _aramState = new AramAutoSwapState();
 
         public GameFlowWatcher(FormMain form, FormUiStateManager uiManager, PlayerCardManager cardManager)
         {
@@ -181,7 +177,6 @@ namespace League.Services
         /// </summary>
         private async Task TryAutoPreliminaryAsync()
         {
-            // 改为异步调用
             var preList = await _form.GetPreSelectedHeroesAsync();
             if (!preList.Any()) return;
 
@@ -190,25 +185,14 @@ namespace League.Services
 
             int queueId = session["queueId"]?.Value<int>() ?? 0;
 
-            // 大乱斗模式
             if (queueId == 450) // ARAM
             {
-                if (_hasSwappedInAram)
-                    return;
-
-                // 传递状态对象
-                bool success = await Globals.lcuClient.AutoSwapInAramAsync(preList, _aramState);
-
-                // 如果状态指示停止，设置标志防止后续调用
-                if (_aramState.StopAutoSwap)
-                {
-                    _hasSwappedInAram = true;
-                }
-
+                // 完全移除 _hasSwappedInAram 判断！一直抢！
+                await Globals.lcuClient.AutoSwapToHighestPriorityAsync(preList);
                 return;
             }
 
-            // 普通模式不变
+            // 普通模式保持原样
             if (_hasAutoPreliminated) return;
             bool successNormal = await Globals.lcuClient.AutoDeclareIntentAsync(preList);
             if (successNormal) _hasAutoPreliminated = true;
@@ -246,9 +230,6 @@ namespace League.Services
             _gameEndHandled = false;
             _hasAutoPreliminated = false;
             _hasSwappedInAram = false; // 每局重置 ARAM 标志
-
-            // 新增：重置 ARAM 状态
-            _aramState = new AramAutoSwapState();  // 每次新局创建一个新实例
 
             // 选人阶段轮询循环
             await Task.Run(async () =>

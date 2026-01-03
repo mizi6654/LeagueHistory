@@ -719,68 +719,37 @@ namespace League.Clients
         }
         #endregion
 
-        #region ARAM 大乱斗自动抢英雄（色子交换）
+        #region ARAM 大乱斗自动抢英雄（极致贪婪版）
         /// <summary>
-        /// ARAM 模式下自动抢取 bench 中更高优先级的预选英雄
-        /// 使用状态对象传递用户意图，避免 ref 限制
+        /// ARAM 模式下无条件抢取 bench 中优先级最高的预选英雄
+        /// 直到拿到列表中最高优先级的为止，绝不停止
         /// </summary>
-        /// <param name="preSelectedHeroes">预选英雄列表</param>
-        /// <param name="state">ARAM 自动换状态（包含用户偏好和停止标志）</param>
-        /// <returns>是否成功执行了一次交换</returns>
-        public async Task<bool> AutoSwapInAramAsync(List<PreliminaryHero> preSelectedHeroes, AramAutoSwapState state)
+        public async Task AutoSwapToHighestPriorityAsync(List<PreliminaryHero> preSelectedHeroes)
         {
-            if (preSelectedHeroes == null || !preSelectedHeroes.Any() || state.StopAutoSwap)
-                return false;
+            if (preSelectedHeroes == null || !preSelectedHeroes.Any())
+                return;
 
             try
             {
                 var session = await GetChampSelectSession();
-                if (session == null) return false;
+                if (session == null) return;
 
                 int queueId = session["queueId"]?.Value<int>() ?? 0;
-                if (queueId != 450) return false;
+                if (queueId != 450) return;
 
                 int myCellId = session["localPlayerCellId"]?.Value<int>() ?? -1;
-                if (myCellId == -1) return false;
+                if (myCellId == -1) return;
 
                 var myTeam = session["myTeam"] as JArray ?? new JArray();
                 var myPlayer = myTeam.FirstOrDefault(p => p["cellId"]?.Value<int>() == myCellId);
                 int currentChampId = myPlayer?["championId"]?.Value<int>() ?? 0;
-                if (currentChampId == 0) return false;
+                if (currentChampId == 0) return;
 
-                var currentHero = preSelectedHeroes.FirstOrDefault(h => h.ChampionId == currentChampId);
+                int currentPriority = preSelectedHeroes
+                    .FirstOrDefault(h => h.ChampionId == currentChampId)
+                    ?.Priority ?? int.MaxValue;
 
-                // 用户意图检测
-                if (currentHero != null)
-                {
-                    if (state.UserPreferredChampId == 0)
-                    {
-                        state.UserPreferredChampId = currentChampId;
-                        Debug.WriteLine($"[ARAM Auto] 用户持有预选英雄 {currentHero.ChampionName}，记录为当前偏好");
-                    }
-                    else if (currentChampId != state.UserPreferredChampId)
-                    {
-                        var oldHero = preSelectedHeroes.First(h => h.ChampionId == state.UserPreferredChampId);
-                        if (currentHero.Priority > oldHero.Priority)
-                        {
-                            Debug.WriteLine($"[ARAM Auto] 用户主动换到较低优先级 {currentHero.ChampionName}，本局停止自动换");
-                            state.StopAutoSwap = true;
-                            return false;
-                        }
-                        state.UserPreferredChampId = currentChampId;
-                        Debug.WriteLine($"[ARAM Auto] 用户换到更高优先级 {currentHero.ChampionName}，继续优化");
-                    }
-                }
-                else
-                {
-                    Debug.WriteLine("[ARAM Auto] 用户选择了非预选英雄，本局停止自动换");
-                    state.StopAutoSwap = true;
-                    return false;
-                }
-
-                if (state.StopAutoSwap) return false;
-
-                // bench 逻辑
+                // bench 中所有可用英雄
                 var benchChampions = session["benchChampions"] as JArray ?? new JArray();
                 var availableChampIds = new HashSet<int>();
                 foreach (var item in benchChampions)
@@ -789,32 +758,33 @@ namespace League.Clients
                     if (id > 0) availableChampIds.Add(id);
                 }
 
-                int currentPriority = currentHero?.Priority ?? int.MaxValue;
-
-                var bestHero = preSelectedHeroes
+                // 找出 bench 中优先级最高的预选英雄
+                var bestAvailable = preSelectedHeroes
                     .Where(h => availableChampIds.Contains(h.ChampionId))
                     .OrderBy(h => h.Priority)
                     .FirstOrDefault();
 
-                if (bestHero == null) return false;
+                if (bestAvailable == null) return;
 
-                if (bestHero.Priority < currentPriority)
+                // 只有当 bench 中的最高优先级 严格高于 当前持有，才抢
+                if (bestAvailable.Priority < currentPriority)
                 {
-                    var response = await PostAsync($"/lol-champ-select/v1/session/bench/swap/{bestHero.ChampionId}");
+                    var response = await PostAsync($"/lol-champ-select/v1/session/bench/swap/{bestAvailable.ChampionId}");
                     if (response.IsSuccessStatusCode)
                     {
-                        Debug.WriteLine($"[ARAM Auto 成功] 自动换到更高优先级 {bestHero.ChampionName} (Priority: {bestHero.Priority})");
-                        await Task.Delay(50);
-                        return true;
+                        Debug.WriteLine($"[ARAM 贪婪抢] 成功换到 {bestAvailable.ChampionName} (Priority: {bestAvailable.Priority}) ← 当前 {currentPriority}");
+                        await Task.Delay(100); // 稍微延时，避免API过于频繁
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"[ARAM 贪婪抢] 交换失败 {bestAvailable.ChampionId}: {response.StatusCode}");
                     }
                 }
-
-                return false;
+                // else: 当前已是最高，或 bench 没有更好的 → 什么都不做，继续等
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[ARAM Auto] 异常: {ex.Message}");
-                return false;
+                Debug.WriteLine($"[ARAM 贪婪抢] 异常: {ex.Message}");
             }
         }
         #endregion
