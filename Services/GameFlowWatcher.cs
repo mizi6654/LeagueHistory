@@ -136,6 +136,17 @@ namespace League.Services
 
                 case "ChampSelect":
                     _uiManager.IsGame = true;
+                    // 【关键修复】立即隐藏“正在等待加入游戏”提示
+                    FormUiStateManager.SafeInvoke(_form.penalGameMatchData, () =>
+                    {
+                        if (_form._waitingPanel != null && _form.penalGameMatchData.Controls.Contains(_form._waitingPanel))
+                        {
+                            _form.penalGameMatchData.Controls.Remove(_form._waitingPanel);
+                            _form._waitingPanel.Dispose();
+                            _form._waitingPanel = null;
+                        }
+                        _form.tableLayoutPanel1.Visible = true; // 同时显示对战面板
+                    });
                     await OnChampSelectStart(); // 进入选人核心逻辑
                     break;
 

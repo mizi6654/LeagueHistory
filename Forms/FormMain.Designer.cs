@@ -214,7 +214,7 @@ namespace League
             groupBox1.Controls.Add(lkbPreliminary);
             groupBox1.Location = new Point(16, 55);
             groupBox1.Name = "groupBox1";
-            groupBox1.Size = new Size(363, 69);
+            groupBox1.Size = new Size(363, 67);
             groupBox1.TabIndex = 6;
             groupBox1.TabStop = false;
             groupBox1.Text = "英雄预选 - 位置信息根据英雄联盟攻略中心数据划分";
@@ -222,7 +222,8 @@ namespace League
             // lkbPreliminary
             // 
             lkbPreliminary.AutoSize = true;
-            lkbPreliminary.Location = new Point(18, 29);
+            lkbPreliminary.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
+            lkbPreliminary.Location = new Point(6, 31);
             lkbPreliminary.Name = "lkbPreliminary";
             lkbPreliminary.Size = new Size(296, 17);
             lkbPreliminary.TabIndex = 5;
