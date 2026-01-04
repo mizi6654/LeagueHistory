@@ -24,7 +24,6 @@ namespace League.Services
         private CancellationTokenSource? _champSelectCts; // 选人阶段专用轮询
 
         // 状态标志
-        private bool _champSelectMessageSent = false; // 防止重复启动热键发送战绩
         private bool _gameEndHandled = false; // 防止重复处理游戏结束
         private bool _hasAutoPreliminated = false; // 只保留这个标志，用于普通模式的预选（ARAM 不需要停止）
         private bool _hasSwappedInAram = false; // 恢复：ARAM 已抢过英雄标志（每局重置，一抢就停）
@@ -131,28 +130,47 @@ namespace League.Services
                         _uiManager.SetLcuUiState(_uiManager.LcuReady, _uiManager.IsGame);
                         _form.imageTabControl1.SelectedIndex = 1;
                     });
-                    _champSelectMessageSent = false;
                     break;
-
+                // 在 HandleGameflowPhase 中：只负责“秒隐 + 强制重绘”，然后立即启动选人逻辑
                 case "ChampSelect":
                     _uiManager.IsGame = true;
-                    // 【关键修复】立即隐藏“正在等待加入游戏”提示
-                    FormUiStateManager.SafeInvoke(_form.penalGameMatchData, () =>
+
+                    // 【一步到位，强制隐藏 + 立即重绘，杜绝残影】
+                    FormUiStateManager.SafeInvoke(_form, () =>
                     {
-                        if (_form._waitingPanel != null && _form.penalGameMatchData.Controls.Contains(_form._waitingPanel))
+                        // 移除等待面板
+                        if (_form._waitingPanel != null)
                         {
-                            _form.penalGameMatchData.Controls.Remove(_form._waitingPanel);
+                            if (_form.penalGameMatchData.Controls.Contains(_form._waitingPanel))
+                            {
+                                _form.penalGameMatchData.Controls.Remove(_form._waitingPanel);
+                            }
                             _form._waitingPanel.Dispose();
                             _form._waitingPanel = null;
                         }
-                        _form.tableLayoutPanel1.Visible = true; // 同时显示对战面板
+
+                        // 准备对战面板（清空 + 显示）
+                        _form.tableLayoutPanel1.Controls.Clear();
+                        _form.tableLayoutPanel1.Visible = true;
+                        _form.tableLayoutPanel1.Dock = DockStyle.Fill;
+                        if (!_form.penalGameMatchData.Controls.Contains(_form.tableLayoutPanel1))
+                        {
+                            _form.penalGameMatchData.Controls.Add(_form.tableLayoutPanel1);
+                        }
+
+                        // 【关键：强制立即重绘，清除残影】
+                        _form.penalGameMatchData.SuspendLayout();
+                        _form.penalGameMatchData.Refresh();  // 最强组合：Invalidate + Update
+                        _form.penalGameMatchData.ResumeLayout(true);
                     });
-                    await OnChampSelectStart(); // 进入选人核心逻辑
+
+                    // 立即启动选人阶段详细逻辑（不等待）
+                    _ = OnChampSelectStart();
+
                     break;
 
                 case "InProgress":
                     _champSelectCts?.Cancel();
-                    _champSelectMessageSent = false;
                     await ShowEnemyTeamCards(); // 显示敌方战绩卡片
                     break;
 
@@ -161,7 +179,6 @@ namespace League.Services
                 case "WaitingForStats":
                 case "Lobby":
                 case "None":
-                    _champSelectMessageSent = false;
                     await HandleGameEndPhase(previousPhase);
                     break;
             }
@@ -219,24 +236,8 @@ namespace League.Services
             _champSelectCts?.Cancel();
             _champSelectCts = new CancellationTokenSource();
             var token = _champSelectCts.Token;
-            Debug.WriteLine("进入选人阶段");
-            // UI 初始化：显示对战数据面板
-            FormUiStateManager.SafeInvoke(_form.penalGameMatchData, () =>
-            {
-                if (_form._waitingPanel != null && _form.penalGameMatchData.Controls.Contains(_form._waitingPanel))
-                {
-                    _form.penalGameMatchData.Controls.Remove(_form._waitingPanel);
-                    _form._waitingPanel.Dispose();
-                    _form._waitingPanel = null;
-                }
-                if (!_form.penalGameMatchData.Controls.Contains(_form.tableLayoutPanel1))
-                {
-                    _form.tableLayoutPanel1.Dock = DockStyle.Fill;
-                    _form.penalGameMatchData.Controls.Add(_form.tableLayoutPanel1);
-                }
-                _form.tableLayoutPanel1.Visible = true;
-                _form.tableLayoutPanel1.Controls.Clear();
-            });
+            Debug.WriteLine("进入选人阶段，已由 HandleGameflowPhase 完成界面切换");
+
             // 重置本局状态
             _gameEndHandled = false;
             _hasAutoPreliminated = false;
@@ -245,6 +246,8 @@ namespace League.Services
             // 选人阶段轮询循环
             await Task.Run(async () =>
             {
+                await Task.Delay(800, token);  // 先等 800ms，让隐藏和重绘彻底完成
+
                 while (!token.IsCancellationRequested)
                 {
                     try
@@ -308,13 +311,6 @@ namespace League.Services
 
             await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
             await _cardManager.FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
-
-            // 只启动一次热键发送战绩功能
-            if (!_champSelectMessageSent)
-            {
-                _form.ListenAndSendMessageWhenHotkeyPressed(myTeam);
-                _champSelectMessageSent = true;
-            }
         }
 
         /// <summary>

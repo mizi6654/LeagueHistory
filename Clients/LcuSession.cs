@@ -768,7 +768,7 @@ namespace League.Clients
                     var response = await PostAsync($"/lol-champ-select/v1/session/bench/swap/{bestAvailable.ChampionId}");
                     if (response.IsSuccessStatusCode)
                     {
-                        Debug.WriteLine($"[ARAM 贪婪抢] 成功换到 {bestAvailable.ChampionName} (Priority: {bestAvailable.Priority}) ← 当前 {currentPriority}");
+                        //Debug.WriteLine($"[ARAM 贪婪抢] 成功换到 {bestAvailable.ChampionName} (Priority: {bestAvailable.Priority}) ← 当前 {currentPriority}");
                         await Task.Delay(100); // 稍微延时，避免API过于频繁
                     }
                     else
