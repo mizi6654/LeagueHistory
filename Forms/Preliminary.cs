@@ -54,7 +54,127 @@ namespace League
 
             // 5. 窗体关闭时保存
             this.FormClosing += Preliminary_FormClosing;
+
+            // ===== 新增：启用右边 ListView 的拖拽排序 =====
+            rightListView.AllowDrop = true;                    // 必须
+            rightListView.ItemDrag += RightListView_ItemDrag;
+            rightListView.DragEnter += RightListView_DragEnter;
+            rightListView.DragOver += RightListView_DragOver;
+            rightListView.DragDrop += RightListView_DragDrop;
+            rightListView.DragLeave += RightListView_DragLeave;
         }
+
+        #region 预选列表拖拽排序
+        private void RightListView_ItemDrag(object sender, ItemDragEventArgs e)
+        {
+            // 只允许左键拖拽，且有选中项时才开始拖拽
+            if (e.Button == MouseButtons.Left && rightListView.SelectedItems.Count > 0)
+            {
+                rightListView.DoDragDrop(rightListView.SelectedItems, DragDropEffects.Move);
+            }
+        }
+
+        private void RightListView_DragEnter(object sender, DragEventArgs e)
+        {
+            e.Effect = DragDropEffects.Move;
+        }
+
+        private void RightListView_DragOver(object sender, DragEventArgs e)
+        {
+            Point cp = rightListView.PointToClient(new Point(e.X, e.Y));
+            ListViewItem hoverItem = rightListView.GetItemAt(cp.X, cp.Y);
+
+            if (hoverItem != null)
+            {
+                Rectangle bounds = hoverItem.Bounds;
+                int margin = bounds.Height / 3; // 上1/3 插前面，下2/3 插后面，更灵敏
+                bool appearsAfter = (cp.Y - bounds.Top) > margin;
+
+                rightListView.InsertionMark.AppearsAfterItem = appearsAfter;
+                rightListView.InsertionMark.Index = hoverItem.Index;
+            }
+            else
+            {
+                // 拖到空白区域，放在最后
+                rightListView.InsertionMark.Index = rightListView.Items.Count;
+                rightListView.InsertionMark.AppearsAfterItem = false;
+            }
+        }
+
+        private void RightListView_DragDrop(object sender, DragEventArgs e)
+        {
+            if (rightListView.SelectedItems.Count == 0) return;
+
+            // 1. 先获取当前插入标记的准确目标位置
+            int targetIndex = rightListView.InsertionMark.Index;
+            bool dropAfter = rightListView.InsertionMark.AppearsAfterItem;
+
+            // 如果标记在最后一项之后，targetIndex 会是 Items.Count，需要特殊处理
+            if (targetIndex == rightListView.Items.Count)
+                dropAfter = true;
+
+            // 计算最终插入位置（在移除前计算）
+            int insertAt = dropAfter ? targetIndex + 1 : targetIndex;
+
+            // 2. 收集所有被拖拽的项（支持多选）
+            var draggedItems = rightListView.SelectedItems
+                .Cast<ListViewItem>()
+                .OrderBy(item => item.Index)  // 按原顺序收集，后面插入时保持相对顺序
+                .ToList();
+
+            if (draggedItems.Count == 0) return;
+
+            // 3. 计算偏移：被拖走的项中，有多少原本在目标位置之前
+            int removedBeforeTarget = draggedItems.Count(item => item.Index < targetIndex);
+
+            // 最终插入位置 = 原始目标位置 - 被移除的“前面项”数量
+            int finalInsertIndex = insertAt - removedBeforeTarget;
+
+            // 边界保护
+            if (finalInsertIndex < 0) finalInsertIndex = 0;
+            if (finalInsertIndex > rightListView.Items.Count) finalInsertIndex = rightListView.Items.Count;
+
+            // 4. 先移除所有拖拽项（从后往前移除，避免索引错乱）
+            for (int i = draggedItems.Count - 1; i >= 0; i--)
+            {
+                rightListView.Items.Remove(draggedItems[i]);
+            }
+
+            // 5. 在正确位置重新插入（保持原相对顺序）
+            foreach (var item in draggedItems)
+            {
+                rightListView.Items.Insert(finalInsertIndex++, item);
+            }
+
+            // 6. 保持选中状态
+            foreach (var item in draggedItems)
+                item.Selected = true;
+            rightListView.Focus();
+
+            // 7. 更新优先级和显示序号
+            UpdatePreSelectedPriorities();
+
+            // 8. 清除插入标记
+            rightListView.InsertionMark.Index = -1;
+        }
+
+        private void RightListView_DragLeave(object sender, EventArgs e)
+        {
+            rightListView.InsertionMark.Index = -1;
+        }
+
+        // 辅助方法：精确计算插入位置（处理多选时索引偏移）
+        private int CalculateInsertIndex(List<ListViewItem> draggedItems, int originalTarget, bool appearsAfter)
+        {
+            int offset = 0;
+            foreach (var item in draggedItems)
+            {
+                if (item.Index < originalTarget)
+                    offset++;
+            }
+            return appearsAfter ? originalTarget - offset + draggedItems.Count : originalTarget - offset;
+        }
+        #endregion
 
         #region 事件订阅与清理
 
