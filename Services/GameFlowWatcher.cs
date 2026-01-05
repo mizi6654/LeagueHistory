@@ -213,7 +213,7 @@ namespace League.Services
 
             int queueId = session["queueId"]?.Value<int>() ?? 0;
 
-            if (queueId == 450) // ARAM
+            if (queueId == 450 || queueId == 2400) // ARAM 大乱斗、洛克斯大乱斗
             {
                 // 完全移除 _hasSwappedInAram 判断！一直抢！
                 await Globals.lcuClient.AutoSwapToHighestPriorityAsync(preList);
@@ -260,7 +260,12 @@ namespace League.Services
                         // 推荐：恢复高频轮询（随机模式下更快抢英雄）
                         var session = await Globals.lcuClient.GetChampSelectSession();
                         int queueId = session?["queueId"]?.Value<int>() ?? 0;
-                        int delay = queueId == 450 ? 250 : 1000;
+                        int delay = queueId switch
+                        {
+                            450 => 250,
+                            2400 => 250,    // 2400的延迟设为500ms，你可以根据需要调整
+                            _ => 1000       // 默认值
+                        };
                         await Task.Delay(delay, token);
                     }
                     catch (TaskCanceledException) { break; }

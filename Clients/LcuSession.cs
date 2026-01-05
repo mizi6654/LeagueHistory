@@ -731,7 +731,7 @@ namespace League.Clients
                 if (session == null) return;
 
                 int queueId = session["queueId"]?.Value<int>() ?? 0;
-                if (queueId != 450) return;
+                if (queueId != 450 && queueId != 2400) return;  // 只有非ARAM模式才返回
 
                 int myCellId = session["localPlayerCellId"]?.Value<int>() ?? -1;
                 if (myCellId == -1) return;
