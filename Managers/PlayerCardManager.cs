@@ -28,6 +28,8 @@ namespace League.Managers
         private readonly ConcurrentDictionary<long, PlayerCardControl> _cardBySummonerId = new();
         private static readonly ConcurrentDictionary<string, Image> _imageCache = new();
 
+        private long _lastSavedZeroIdGameId = 0;  // 记录已保存过 summonerId=0 的 gameId
+
         public PlayerCardManager(FormMain form, MatchQueryProcessor matchQueryProcessor)
         {
             _form = form;
@@ -134,29 +136,41 @@ namespace League.Managers
             if (zeroIdPlayers.Any())
             {
                 string teamType = isMyTeam ? "MyTeam" : "EnemyTeam";
-                string folderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "playerErr");
-                Directory.CreateDirectory(folderPath);
 
-                string fileName = $"{teamType}_summonerId0_GameId{gameId}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
-                string fullPath = Path.Combine(folderPath, fileName);
-
-                try
+                // 关键：只有当 gameId 变化时才保存（防止同一局反复保存）
+                if (gameId != _lastSavedZeroIdGameId)
                 {
-                    // 保存传入的 team 数据（就是原始 session 中的 myTeam 或 enemyTeam）
-                    File.WriteAllText(fullPath, team.ToString(Newtonsoft.Json.Formatting.Indented));
-                    Debug.WriteLine($"[调试保存] {teamType} 发现 {zeroIdPlayers.Count} 个 summonerId=0，已保存 team 数据到: {fullPath}");
+                    string folderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "playerErr");
+                    Directory.CreateDirectory(folderPath);
 
-                    // 额外打印关键信息
-                    foreach (var p in zeroIdPlayers)
+                    string fileName = $"{teamType}_summonerId0_GameId{gameId}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+                    string fullPath = Path.Combine(folderPath, fileName);
+
+                    try
                     {
-                        string puuid = p["puuid"]?.ToString() ?? "";
-                        int champId = p["championId"]?.Value<int>() ?? 0;
-                        Debug.WriteLine($"[隐藏玩家] summonerId=0, puuid={(string.IsNullOrEmpty(puuid) ? "空" : "有")}, championId={champId}");
+                        File.WriteAllText(fullPath, team.ToString(Newtonsoft.Json.Formatting.Indented));
+                        Debug.WriteLine($"[调试保存] {teamType} 发现 {zeroIdPlayers.Count} 个 summonerId=0，已保存 team 数据到: {fullPath}");
+
+                        foreach (var p in zeroIdPlayers)
+                        {
+                            string puuid = p["puuid"]?.ToString() ?? "";
+                            string obsPuuid = p["obfuscatedPuuid"]?.ToString() ?? "";
+                            int champId = p["championId"]?.Value<int>() ?? 0;
+                            Debug.WriteLine($"[隐藏玩家] summonerId=0, puuid={(string.IsNullOrEmpty(puuid) ? "空" : "有")}, obfuscatedPuuid={obsPuuid}, championId={champId}");
+                        }
+
+                        // 记录已保存
+                        _lastSavedZeroIdGameId = gameId;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[调试保存失败] {teamType} 保存异常: {ex.Message}");
                     }
                 }
-                catch (Exception ex)
+                else
                 {
-                    Debug.WriteLine($"[调试保存失败] {teamType} 保存异常: {ex.Message}");
+                    // 已保存过，静默跳过
+                    // Debug.WriteLine($"[调试跳过] 本局 GameId {gameId} 已保存过 summonerId=0 数据，跳过重复保存");
                 }
             }
 
@@ -313,6 +327,8 @@ namespace League.Managers
             _cachedPlayerMatchInfos.Clear();
             playerMatchCache.Clear();
             _cardBySummonerId.Clear();
+
+            _lastSavedZeroIdGameId = 0;  // 新增：重置保存标志
         }
         #endregion
 
