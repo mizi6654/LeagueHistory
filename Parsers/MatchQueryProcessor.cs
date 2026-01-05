@@ -87,7 +87,7 @@ namespace League.Parsers
         }
 
         /// <summary>
-        /// 获取玩家战绩信息（核心方法）
+        /// 获取玩家战绩信息（核心方法） - 新增对隐藏玩家（obfuscated）的支持
         /// </summary>
         public async Task<PlayerMatchInfo> FetchPlayerMatchInfoAsync(JToken playerData)
         {
@@ -95,50 +95,61 @@ namespace League.Parsers
                 throw new ArgumentNullException(nameof(playerData));
 
             long summonerId = playerData["summonerId"]?.Value<long>() ?? 0;
-            string puuid = playerData["puuid"]?.ToString();           // 一定存在（我方有，敌方InProgress有）
+            string puuid = playerData["puuid"]?.ToString() ?? "";
+            string obfuscatedPuuid = playerData["obfuscatedPuuid"]?.ToString() ?? "";
+            long obfuscatedSummonerId = playerData["obfuscatedSummonerId"]?.Value<long>() ?? 0;
             int championId = playerData["championId"]?.Value<int>() ?? 0;
+
+            // 关键修复：如果真实 puuid 为空，但有 obfuscatedPuuid，则使用它来查询战绩
+            if (string.IsNullOrEmpty(puuid) && !string.IsNullOrEmpty(obfuscatedPuuid))
+            {
+                puuid = obfuscatedPuuid;
+                // summonerId 也用 obfuscated 的（虽然通常没用，但保持一致）
+                summonerId = obfuscatedSummonerId != 0 ? obfuscatedSummonerId : summonerId;
+                Debug.WriteLine($"[隐藏玩家] 使用 obfuscatedPuuid 查询战绩: {puuid}");
+            }
 
             PlayerMatchInfo result = null;
 
-            // 第一步：先查缓存（用 summonerId，保持原有逻辑）
+            // 缓存优先用 summonerId（即使是 obfuscated 的也行，因为同一局内唯一）
             if (summonerId != 0 && _playerMatchCache.TryGetValue(summonerId, out var cached))
             {
-                //Debug.WriteLine($"[战绩查询] 缓存命中 (summonerId={summonerId})");
                 cached.Player.ChampionId = championId;
                 cached.Player.ChampionName = GetChampionName(championId);
                 cached.Player.Avatar = await GetChampionIconAsync(championId);
                 return cached;
             }
 
-            // 第二步：获取名字（始终优先用 summonerId 查询）
-            string gameName = "查询失败";
+            // 获取名字：如果 summonerId 是 0，跳过 LCU 查询名字（会失败）
+            string gameName = "隐藏玩家";
             string tagLine = "";
             string privacyStatus = "隐藏";
+
             if (summonerId != 0)
             {
                 var summonerInfo = await Globals.lcuClient.GetGameNameBySummonerId(summonerId.ToString());
                 if (summonerInfo != null)
                 {
-                    gameName = summonerInfo["gameName"]?.ToString() ?? "查询失败";
+                    gameName = summonerInfo["gameName"]?.ToString() ?? "隐藏玩家";
                     tagLine = summonerInfo["tagLine"]?.ToString() ?? "";
                     privacyStatus = summonerInfo["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) ?? false
                         ? "公开" : "隐藏";
 
-                    // 名字成功了，顺便更新 puuid（虽然通常已有）
-                    puuid = summonerInfo["puuid"]?.ToString() ?? puuid;
+                    // 更新 puuid（保险起见）
+                    var realPuuid = summonerInfo["puuid"]?.ToString();
+                    if (!string.IsNullOrEmpty(realPuuid))
+                        puuid = realPuuid;
                 }
             }
 
             string displayName = string.IsNullOrEmpty(tagLine) ? gameName : $"{gameName}";
 
-            // 第三步：用 puuid 查询段位和战绩（最可靠的路径）
+            // puuid 必须有效才能查段位和战绩
             if (string.IsNullOrEmpty(puuid) || puuid.Length < 10)
             {
-                // puuid 无效，几乎不可能，但防御性编程
                 goto Failed;
             }
 
-            //Debug.WriteLine($"[战绩查询] 使用 puuid 查询段位与战绩");
             var rankedStats = await GetRankedStatsAsync(puuid);
             string soloRank = GetFormattedRank(rankedStats, "单双排");
             string flexRank = GetFormattedRank(rankedStats, "灵活组排");
@@ -153,13 +164,12 @@ namespace League.Parsers
                 ChampionId = championId,
                 ChampionName = GetChampionName(championId),
                 Avatar = await GetChampionIconAsync(championId),
-                GameName = displayName,         // 名字可能“查询失败”
+                GameName = displayName,
                 SoloRank = soloRank,
                 FlexRank = flexRank,
                 IsPublic = privacyStatus
             };
 
-            // 缓存：只要 summonerId 有效，就缓存（方便下次命中）
             if (summonerId != 0)
             {
                 _playerMatchCache[summonerId] = result;
@@ -168,19 +178,18 @@ namespace League.Parsers
             return result;
 
         Failed:
-            // 极少走到这里（puuid 无效）
             return new PlayerMatchInfo
             {
                 Player = new PlayerInfo
                 {
-                    SummonerId = 0,
+                    SummonerId = summonerId,
                     ChampionId = championId,
                     ChampionName = GetChampionName(championId),
                     Avatar = await GetChampionIconAsync(championId),
-                    GameName = "查询失败",
-                    SoloRank = "查询失败",
-                    FlexRank = "查询失败",
-                    IsPublic = "[失败]"
+                    GameName = "隐藏玩家",
+                    SoloRank = "隐藏",
+                    FlexRank = "隐藏",
+                    IsPublic = "隐藏"
                 },
                 MatchItems = new List<ListViewItem>(),
                 HeroIcons = new ImageList()
