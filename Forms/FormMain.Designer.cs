@@ -45,6 +45,10 @@ namespace League
             tabControl1 = new TabControl();
             tabPage4 = new TabPage();
             groupBox1 = new GroupBox();
+            chkNexus = new CheckBox();
+            chkAram = new CheckBox();
+            chkRanked = new CheckBox();
+            chkNormal = new CheckBox();
             lkbPreliminary = new LinkLabel();
             checkBoxFilterMode = new CheckBox();
             tabPage5 = new TabPage();
@@ -211,13 +215,57 @@ namespace League
             // 
             // groupBox1
             // 
+            groupBox1.Controls.Add(chkNexus);
+            groupBox1.Controls.Add(chkAram);
+            groupBox1.Controls.Add(chkRanked);
+            groupBox1.Controls.Add(chkNormal);
             groupBox1.Controls.Add(lkbPreliminary);
             groupBox1.Location = new Point(16, 55);
             groupBox1.Name = "groupBox1";
-            groupBox1.Size = new Size(363, 67);
+            groupBox1.Size = new Size(363, 124);
             groupBox1.TabIndex = 6;
             groupBox1.TabStop = false;
             groupBox1.Text = "英雄预选 - 位置信息根据英雄联盟攻略中心数据划分";
+            // 
+            // chkNexus
+            // 
+            chkNexus.AutoSize = true;
+            chkNexus.Location = new Point(132, 87);
+            chkNexus.Name = "chkNexus";
+            chkNexus.Size = new Size(147, 21);
+            chkNexus.TabIndex = 9;
+            chkNexus.Text = "启用海克斯大乱斗预选";
+            chkNexus.UseVisualStyleBackColor = true;
+            // 
+            // chkAram
+            // 
+            chkAram.AutoSize = true;
+            chkAram.Location = new Point(6, 87);
+            chkAram.Name = "chkAram";
+            chkAram.Size = new Size(111, 21);
+            chkAram.TabIndex = 8;
+            chkAram.Text = "启用大乱斗预选";
+            chkAram.UseVisualStyleBackColor = true;
+            // 
+            // chkRanked
+            // 
+            chkRanked.AutoSize = true;
+            chkRanked.Location = new Point(132, 62);
+            chkRanked.Name = "chkRanked";
+            chkRanked.Size = new Size(176, 21);
+            chkRanked.TabIndex = 7;
+            chkRanked.Text = "启用排位预选（单双/灵活）";
+            chkRanked.UseVisualStyleBackColor = true;
+            // 
+            // chkNormal
+            // 
+            chkNormal.AutoSize = true;
+            chkNormal.Location = new Point(6, 60);
+            chkNormal.Name = "chkNormal";
+            chkNormal.Size = new Size(99, 21);
+            chkNormal.TabIndex = 6;
+            chkNormal.Text = "启用匹配预选";
+            chkNormal.UseVisualStyleBackColor = true;
             // 
             // lkbPreliminary
             // 
@@ -225,10 +273,10 @@ namespace League
             lkbPreliminary.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
             lkbPreliminary.Location = new Point(6, 31);
             lkbPreliminary.Name = "lkbPreliminary";
-            lkbPreliminary.Size = new Size(296, 17);
+            lkbPreliminary.Size = new Size(344, 17);
             lkbPreliminary.TabIndex = 5;
             lkbPreliminary.TabStop = true;
-            lkbPreliminary.Text = "点击英雄预选配置，目前支持匹配、排位、大乱斗模式";
+            lkbPreliminary.Text = "点击英雄预选配置，目前支持匹配、排位、大乱斗、海克斯乱斗";
             lkbPreliminary.LinkClicked += lkbPreliminary_LinkClicked;
             // 
             // checkBoxFilterMode
@@ -296,5 +344,9 @@ namespace League
         public TableLayoutPanel tableLayoutPanel1;
         public ImageTabControl imageTabControl1;
         private GroupBox groupBox1;
+        private CheckBox chkNexus;
+        private CheckBox chkAram;
+        private CheckBox chkRanked;
+        private CheckBox chkNormal;
     }
 }

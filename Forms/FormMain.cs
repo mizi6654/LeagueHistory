@@ -99,6 +99,17 @@ namespace League
 
                 // 根据配置恢复复选框
                 checkBoxFilterMode.Checked = _appConfig.FilterByGameMode;
+                // 恢复复选框状态（新增）
+                chkNormal.Checked = _appConfig.EnablePreliminaryInNormal;   //匹配
+                chkRanked.Checked = _appConfig.EnablePreliminaryInRanked;   //排位
+                chkAram.Checked = _appConfig.EnablePreliminaryInAram;       //大乱斗
+                chkNexus.Checked = _appConfig.EnablePreliminaryInNexusBlitz;    //海克斯乱斗
+
+                // 绑定事件（建议统一一个事件处理）
+                chkNormal.CheckedChanged += ModeCheckBox_CheckedChanged;
+                chkRanked.CheckedChanged += ModeCheckBox_CheckedChanged;
+                chkAram.CheckedChanged += ModeCheckBox_CheckedChanged;
+                chkNexus.CheckedChanged += ModeCheckBox_CheckedChanged;
 
                 // 检查更新（不等待，避免阻塞UI）
                 _ = _configUpdateManager.CheckForUpdates();
@@ -588,6 +599,20 @@ namespace League
             _matchQueryProcessor?.SetFilterMode(checkBoxFilterMode.Checked);
 
             Debug.WriteLine($"[配置] 过滤模式改为: {checkBoxFilterMode.Checked}，配置已保存");
+        }
+
+        private void ModeCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_appConfig == null) return;
+
+            _appConfig.EnablePreliminaryInNormal = chkNormal.Checked;
+            _appConfig.EnablePreliminaryInRanked = chkRanked.Checked;
+            _appConfig.EnablePreliminaryInAram = chkAram.Checked;
+            _appConfig.EnablePreliminaryInNexusBlitz = chkNexus.Checked;
+
+            SaveAppConfig(); // 立即保存到 LeagueConfig.json
+
+            Debug.WriteLine("[自动预选模式] 配置已更新并保存");
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
