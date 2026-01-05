@@ -203,27 +203,88 @@ namespace League.Services
         /// <summary>
         /// 每轮选人阶段调用一次：负责普通模式的意图预选 + 随机模式的抢英雄
         /// </summary>
+        //private async Task TryAutoPreliminaryAsync()
+        //{
+        //    var preList = await _form.GetPreSelectedHeroesAsync();
+        //    if (!preList.Any()) return;
+
+        //    var session = await Globals.lcuClient.GetChampSelectSession();
+        //    if (session == null) return;
+
+        //    int queueId = session["queueId"]?.Value<int>() ?? 0;
+
+        //    if (queueId == 450 || queueId == 2400) // ARAM 大乱斗、洛克斯大乱斗
+        //    {
+        //        // 完全移除 _hasSwappedInAram 判断！一直抢！
+        //        await Globals.lcuClient.AutoSwapToHighestPriorityAsync(preList);
+        //        return;
+        //    }
+
+        //    // 普通模式保持原样
+        //    if (_hasAutoPreliminated) return;
+        //    bool successNormal = await Globals.lcuClient.AutoDeclareIntentAsync(preList);
+        //    if (successNormal) _hasAutoPreliminated = true;
+        //}
+
+        //自动预选功能核心方法，新增根据勾选的模式进行过滤
         private async Task TryAutoPreliminaryAsync()
         {
+            // 先检查全局是否启用自动预选
+            var preConfig = _form.GetAppConfig()?.Preliminary;
+            if (preConfig == null || !preConfig.EnableAutoPreliminary)
+                return;
+
             var preList = await _form.GetPreSelectedHeroesAsync();
-            if (!preList.Any()) return;
+            if (!preList.Any())
+                return;
 
             var session = await Globals.lcuClient.GetChampSelectSession();
-            if (session == null) return;
+            if (session == null)
+                return;
 
             int queueId = session["queueId"]?.Value<int>() ?? 0;
 
-            if (queueId == 450 || queueId == 2400) // ARAM 大乱斗、洛克斯大乱斗
+            // ==================== 新增：根据 queueId 和用户配置决定是否执行 ====================
+            bool shouldExecute = queueId switch
             {
-                // 完全移除 _hasSwappedInAram 判断！一直抢！
+                // 匹配模式：盲选(430)、征召(400)等
+                400 or 430 => _form.GetAppConfig().EnablePreliminaryInNormal,
+
+                // 排位模式：单双排(420)、灵活选排(440)
+                420 or 440 => _form.GetAppConfig().EnablePreliminaryInRanked,
+
+                // 大乱斗
+                450 => _form.GetAppConfig().EnablePreliminaryInAram,
+
+                // 海克斯大乱斗（Nexus Blitz / Hexakill ARAM）
+                2400 => _form.GetAppConfig().EnablePreliminaryInNexusBlitz,
+
+                _ => false // 其他模式一律不执行
+            };
+
+            if (!shouldExecute)
+            {
+                Debug.WriteLine($"[自动预选] 当前模式 queueId={queueId} 未勾选，跳过自动预选");
+                return;
+            }
+            // ===============================================================================
+
+            // 原有逻辑保持不变
+            if (queueId == 450 || queueId == 2400) // ARAM 类模式：一直抢最高优先级
+            {
                 await Globals.lcuClient.AutoSwapToHighestPriorityAsync(preList);
                 return;
             }
 
-            // 普通模式保持原样
+            // 普通模式：只声明一次意图
             if (_hasAutoPreliminated) return;
-            bool successNormal = await Globals.lcuClient.AutoDeclareIntentAsync(preList);
-            if (successNormal) _hasAutoPreliminated = true;
+
+            bool success = await Globals.lcuClient.AutoDeclareIntentAsync(preList);
+            if (success)
+            {
+                _hasAutoPreliminated = true;
+                Debug.WriteLine("[自动预选] 普通模式意图声明成功");
+            }
         }
         #endregion
 
