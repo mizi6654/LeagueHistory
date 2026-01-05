@@ -424,25 +424,69 @@ namespace League.UIState
         #endregion
 
         #region 工具方法
+        /// <summary>
+        /// 线程安全的UI调用（彻底解决“在创建窗口句柄之前不能调用 Invoke”问题）
+        /// </summary>
         public static void SafeInvoke(Control? control, Action action)
         {
-            if (control == null || control.IsDisposed) return;
+            if (control == null || control.IsDisposed || action == null)
+                return;
 
-            if (control.InvokeRequired)
+            // 第一优先级：如果句柄已创建，使用标准 Invoke 流程
+            if (control.IsHandleCreated)
             {
-                try
+                if (control.InvokeRequired)
                 {
-                    control.BeginInvoke(action);
+                    try
+                    {
+                        control.BeginInvoke(new Action(() =>
+                        {
+                            try
+                            {
+                                action();
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[SafeInvoke 内层异常] {ex.Message}");
+                            }
+                        }));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // 控件正在销毁或句柄已失效，静默忽略
+                    }
                 }
-                catch
+                else
                 {
-                    // 控件已销毁时忽略
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[SafeInvoke 直接执行异常] {ex.Message}");
+                    }
                 }
             }
             else
             {
-                action();
+                // 第二优先级：句柄未创建 → 此时必然在 UI 线程（因为非 UI 线程无法创建控件）
+                // 直接执行是安全的，且必须执行（否则 UI 更新会丢失）
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SafeInvoke 句柄未创建时执行异常] {ex.Message}");
+                }
             }
+        }
+
+        // 重载：支持直接传 Form
+        public static void SafeInvoke(Form form, Action action)
+        {
+            SafeInvoke((Control)form, action);
         }
         #endregion
     }
