@@ -25,6 +25,7 @@ namespace League.Services
 
         // 状态标志
         private bool _gameEndHandled = false; // 防止重复处理游戏结束
+        private bool _champSelectMessageSent = false; // 防止重复启动热键发送战绩
         private bool _hasAutoPreliminated = false; // 只保留这个标志，用于普通模式的预选（ARAM 不需要停止）
         private bool _hasSwappedInAram = false; // 恢复：ARAM 已抢过英雄标志（每局重置，一抢就停）
 
@@ -171,6 +172,7 @@ namespace League.Services
 
                 case "InProgress":
                     _champSelectCts?.Cancel();
+                    _champSelectMessageSent = false;    //重置聊天发送战绩
                     await ShowEnemyTeamCards(); // 显示敌方战绩卡片
                     break;
 
@@ -345,6 +347,7 @@ namespace League.Services
         /// </summary>
         private async Task ShowMyTeamCards()
         {
+            Debug.WriteLine("开始查询我方队伍战绩");
             var session = await Globals.lcuClient.GetChampSelectSession();
             if (session == null) return;
 
@@ -377,6 +380,13 @@ namespace League.Services
 
             await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
             await _cardManager.FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
+
+            // 只启动一次热键发送战绩功能
+            if (!_champSelectMessageSent)
+            {
+                _form.ListenAndSendMessageWhenHotkeyPressed(myTeam);
+                _champSelectMessageSent = true;
+            }
         }
 
         /// <summary>
@@ -384,6 +394,8 @@ namespace League.Services
         /// </summary>
         private async Task ShowEnemyTeamCards()
         {
+            Debug.WriteLine("开始查询敌方队伍战绩");
+
             try
             {
                 // 获取当前玩家 puuid

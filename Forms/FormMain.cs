@@ -15,6 +15,7 @@ using League.uitls;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace League
@@ -314,6 +315,7 @@ namespace League
 
             // 4️⃣ 重置强制刷新状态（只生效一次）
             RefreshState.ForceMatchRefresh = false;
+
             return allGames;
         }
 
@@ -464,19 +466,20 @@ namespace League
 
                 // 打开聊天框
                 SendKeys.SendWait("{ENTER}");
-                Thread.Sleep(50);
+                Thread.Sleep(3000);
 
                 // 粘贴
                 SendKeys.SendWait("^v");
-                Thread.Sleep(50);
+                Thread.Sleep(5000);
 
                 // 回车发送
                 SendKeys.SendWait("{ENTER}");
-                Thread.Sleep(100);
+                Thread.Sleep(1000);
             }
 
             Debug.WriteLine("[战绩信息] SendKeys 发送完成 (逐行发送)");
         }
+
         #endregion
 
         #region 辅助方法
