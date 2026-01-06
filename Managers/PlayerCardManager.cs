@@ -250,6 +250,17 @@ namespace League.Managers
 
         #region 缓存管理
         /// <summary>
+        /// 供 FormMain 热键发送战绩时使用，安全获取缓存中的玩家战绩信息
+        /// </summary>
+        public bool TryGetCachedPlayerInfo(long summonerId, out PlayerMatchInfo info)
+        {
+            lock (_cachedPlayerMatchInfos)
+            {
+                return _cachedPlayerMatchInfos.TryGetValue(summonerId, out info);
+            }
+        }
+
+        /// <summary>
         /// 清空所有缓存
         /// </summary>
         public void ClearAllCaches()

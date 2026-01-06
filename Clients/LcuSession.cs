@@ -771,10 +771,6 @@ namespace League.Clients
                         //Debug.WriteLine($"[ARAM 贪婪抢] 成功换到 {bestAvailable.ChampionName} (Priority: {bestAvailable.Priority}) ← 当前 {currentPriority}");
                         await Task.Delay(100); // 稍微延时，避免API过于频繁
                     }
-                    else
-                    {
-                        Debug.WriteLine($"[ARAM 贪婪抢] 交换失败 {bestAvailable.ChampionId}: {response.StatusCode}");
-                    }
                 }
                 // else: 当前已是最高，或 bench 没有更好的 → 什么都不做，继续等
             }
