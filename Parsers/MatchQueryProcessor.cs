@@ -87,7 +87,7 @@ namespace League.Parsers
         }
 
         /// <summary>
-        /// 获取玩家战绩信息（核心方法） - 新增对隐藏玩家（obfuscated）的支持
+        /// 获取玩家战绩信息（核心方法） - 新增对隐藏玩家（obfuscated）的判断
         /// </summary>
         public async Task<PlayerMatchInfo> FetchPlayerMatchInfoAsync(JToken playerData)
         {
@@ -95,24 +95,34 @@ namespace League.Parsers
                 throw new ArgumentNullException(nameof(playerData));
 
             long summonerId = playerData["summonerId"]?.Value<long>() ?? 0;
+            string nameVisibility = playerData["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
             string puuid = playerData["puuid"]?.ToString() ?? "";
-            string obfuscatedPuuid = playerData["obfuscatedPuuid"]?.ToString() ?? "";
-            long obfuscatedSummonerId = playerData["obfuscatedSummonerId"]?.Value<long>() ?? 0;
             int championId = playerData["championId"]?.Value<int>() ?? 0;
 
-            // 关键修复：如果真实 puuid 为空，但有 obfuscatedPuuid，则使用它来查询战绩
-            if (string.IsNullOrEmpty(puuid) && !string.IsNullOrEmpty(obfuscatedPuuid))
+            // 隐藏玩家直接返回
+            if (nameVisibility == "HIDDEN" || summonerId == 0)
             {
-                puuid = obfuscatedPuuid;
-                // summonerId 也用 obfuscated 的（虽然通常没用，但保持一致）
-                summonerId = obfuscatedSummonerId != 0 ? obfuscatedSummonerId : summonerId;
-                Debug.WriteLine($"[隐藏玩家] 使用 obfuscatedPuuid 查询战绩: {puuid}");
+                Debug.WriteLine($"[隐藏玩家] 检测到隐藏玩家，跳过查询 (championId={championId})");
+                return new PlayerMatchInfo
+                {
+                    Player = new PlayerInfo
+                    {
+                        SummonerId = 0,
+                        ChampionId = championId,
+                        ChampionName = GetChampionName(championId),
+                        Avatar = await GetChampionIconAsync(championId),  // 这里可以直接 await，因为外层是 async
+                        GameName = "隐藏玩家",
+                        SoloRank = "隐藏",
+                        FlexRank = "隐藏",
+                        IsPublic = "隐藏"
+                    },
+                    MatchItems = new List<ListViewItem>(),
+                    HeroIcons = new ImageList()
+                };
             }
 
-            PlayerMatchInfo result = null;
-
-            // 缓存优先用 summonerId（即使是 obfuscated 的也行，因为同一局内唯一）
-            if (summonerId != 0 && _playerMatchCache.TryGetValue(summonerId, out var cached))
+            // 缓存命中
+            if (_playerMatchCache.TryGetValue(summonerId, out var cached))
             {
                 cached.Player.ChampionId = championId;
                 cached.Player.ChampionName = GetChampionName(championId);
@@ -120,42 +130,55 @@ namespace League.Parsers
                 return cached;
             }
 
-            // 获取名字：如果 summonerId 是 0，跳过 LCU 查询名字（会失败）
-            string gameName = "隐藏玩家";
+            // 正常玩家逻辑...
+            string gameName = "未知玩家";
             string tagLine = "";
             string privacyStatus = "隐藏";
 
-            if (summonerId != 0)
+            var summonerInfo = await Globals.lcuClient.GetGameNameBySummonerId(summonerId.ToString());
+            if (summonerInfo != null)
             {
-                var summonerInfo = await Globals.lcuClient.GetGameNameBySummonerId(summonerId.ToString());
-                if (summonerInfo != null)
-                {
-                    gameName = summonerInfo["gameName"]?.ToString() ?? "隐藏玩家";
-                    tagLine = summonerInfo["tagLine"]?.ToString() ?? "";
-                    privacyStatus = summonerInfo["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) ?? false
-                        ? "公开" : "隐藏";
+                gameName = summonerInfo["gameName"]?.ToString() ?? "未知玩家";
+                tagLine = summonerInfo["tagLine"]?.ToString() ?? "";
+                privacyStatus = summonerInfo["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) == true
+                    ? "公开" : "隐藏";
 
-                    // 更新 puuid（保险起见）
-                    var realPuuid = summonerInfo["puuid"]?.ToString();
-                    if (!string.IsNullOrEmpty(realPuuid))
-                        puuid = realPuuid;
-                }
+                var realPuuid = summonerInfo["puuid"]?.ToString();
+                if (!string.IsNullOrEmpty(realPuuid))
+                    puuid = realPuuid;
             }
 
             string displayName = string.IsNullOrEmpty(tagLine) ? gameName : $"{gameName}";
 
-            // puuid 必须有效才能查段位和战绩
             if (string.IsNullOrEmpty(puuid) || puuid.Length < 10)
             {
-                goto Failed;
+                Debug.WriteLine($"[战绩查询失败] puuid 无效 (summonerId={summonerId})");
+                // 直接在这里创建返回对象，不需要额外局部方法
+                return new PlayerMatchInfo
+                {
+                    Player = new PlayerInfo
+                    {
+                        SummonerId = summonerId,
+                        ChampionId = championId,
+                        ChampionName = GetChampionName(championId),
+                        Avatar = await GetChampionIconAsync(championId),
+                        GameName = displayName,
+                        SoloRank = "未知",
+                        FlexRank = "未知",
+                        IsPublic = "隐藏"
+                    },
+                    MatchItems = new List<ListViewItem>(),
+                    HeroIcons = new ImageList()
+                };
             }
 
+            // 后续查询段位、战绩...
             var rankedStats = await GetRankedStatsAsync(puuid);
             string soloRank = GetFormattedRank(rankedStats, "单双排");
             string flexRank = GetFormattedRank(rankedStats, "灵活组排");
 
             var matchesJson = await GetPlayerMatchesAsync(puuid);
-            result = ParsePlayerMatchInfo(puuid, matchesJson);
+            var result = ParsePlayerMatchInfo(puuid, matchesJson);
 
             result.Player = new PlayerInfo
             {
@@ -170,73 +193,10 @@ namespace League.Parsers
                 IsPublic = privacyStatus
             };
 
-            if (summonerId != 0)
-            {
-                _playerMatchCache[summonerId] = result;
-            }
-
+            _playerMatchCache[summonerId] = result;
             return result;
-
-        Failed:
-            return new PlayerMatchInfo
-            {
-                Player = new PlayerInfo
-                {
-                    SummonerId = summonerId,
-                    ChampionId = championId,
-                    ChampionName = GetChampionName(championId),
-                    Avatar = await GetChampionIconAsync(championId),
-                    GameName = "隐藏玩家",
-                    SoloRank = "隐藏",
-                    FlexRank = "隐藏",
-                    IsPublic = "隐藏"
-                },
-                MatchItems = new List<ListViewItem>(),
-                HeroIcons = new ImageList()
-            };
         }
 
-        /// <summary>
-        /// 获取玩家基础信息
-        /// </summary>
-        private async Task<PlayerInfo> GetPlayerBasicInfoAsync(long summonerId, int championId)
-        {
-            var summoner = await Globals.lcuClient.GetGameNameBySummonerId(summonerId.ToString());
-            if (summoner == null)
-                return null;
-
-            string puuid = summoner["puuid"]?.ToString() ?? "";
-            string gameName = summoner["gameName"]?.ToString() ?? "未知玩家";
-
-            // 获取隐私状态
-            string privacyStatus = "隐藏";
-            if (summoner["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) ?? false)
-            {
-                privacyStatus = "公开";
-            }
-
-            // 获取段位信息
-            var rankedStats = await GetRankedStatsAsync(puuid);
-            string soloRank = GetFormattedRank(rankedStats, "单双排");
-            string flexRank = GetFormattedRank(rankedStats, "灵活组排");
-
-            // 获取英雄信息
-            string championName = GetChampionName(championId);
-            Image championIcon = await GetChampionIconAsync(championId);
-
-            return new PlayerInfo
-            {
-                Puuid = puuid,
-                SummonerId = summonerId,
-                ChampionId = championId,
-                ChampionName = championName,
-                Avatar = championIcon,
-                GameName = gameName,
-                IsPublic = privacyStatus,
-                SoloRank = soloRank,
-                FlexRank = flexRank
-            };
-        }
 
         /// <summary>
         /// 获取玩家战绩数据，新增是否过滤模式
