@@ -1,11 +1,12 @@
-﻿using System.IO;
-using Newtonsoft.Json.Linq;
-using System.Diagnostics;
-using static League.FormMain;
-using League.Extensions;
+﻿using League.Extensions;
 using League.Managers;
+using League.Parsers;
 using League.States;
 using League.UIState;
+using Newtonsoft.Json.Linq;
+using System.Diagnostics;
+using System.IO;
+using static League.FormMain;
 
 namespace League.Services
 {
@@ -18,6 +19,7 @@ namespace League.Services
         private readonly FormMain _form;
         private readonly FormUiStateManager _uiManager;
         private readonly PlayerCardManager _cardManager;
+        private readonly MatchQueryProcessor _matchQueryProcessor;
 
         // 取消令牌：用于控制后台轮询任务
         private CancellationTokenSource? _watcherCts;     // 全局游戏流程监听
@@ -28,11 +30,12 @@ namespace League.Services
         private bool _hasAutoPreliminated = false; // 只保留这个标志，用于普通模式的预选（ARAM 不需要停止）
         private bool _hasSwappedInAram = false; // 恢复：ARAM 已抢过英雄标志（每局重置，一抢就停）
 
-        public GameFlowWatcher(FormMain form, FormUiStateManager uiManager, PlayerCardManager cardManager)
+        public GameFlowWatcher(FormMain form, FormUiStateManager uiManager, PlayerCardManager cardManager, MatchQueryProcessor matchQueryProcessor)
         {
             _form = form;
             _uiManager = uiManager;
             _cardManager = cardManager;
+            _matchQueryProcessor = matchQueryProcessor;
         }
 
         #region 1. 全局游戏流程监听（Lobby → Matchmaking → ChampSelect → InProgress → End）
@@ -124,6 +127,13 @@ namespace League.Services
                 case "Matchmaking":
                 case "ReadyCheck":
                     _uiManager.IsGame = false;
+
+                    // ===== 新增：开局时立刻清空所有战绩缓存（包括你自己）=====
+                    _cardManager.ClearAllCaches();
+                    _cardManager.ClearGameState();
+                    _matchQueryProcessor.ClearPlayerMatchCache(); 
+                    // =========================================================
+
                     _cardManager.ClearGameState();
                     FormUiStateManager.SafeInvoke(_form.imageTabControl1, () =>
                     {
@@ -179,6 +189,13 @@ namespace League.Services
                 case "WaitingForStats":
                 case "Lobby":
                 case "None":
+
+                    // ===== 新增：游戏结束或回到大厅时也清空缓存（双保险）=====
+                    _cardManager.ClearAllCaches();
+                    _cardManager.ClearGameState();
+                    _matchQueryProcessor.ClearPlayerMatchCache();
+                    // =====================================================
+
                     await HandleGameEndPhase(previousPhase);
                     break;
             }
@@ -201,32 +218,8 @@ namespace League.Services
 
         #region 2. 自动预选 / 抢英雄核心逻辑
         /// <summary>
-        /// 每轮选人阶段调用一次：负责普通模式的意图预选 + 随机模式的抢英雄
+        /// 自动预选功能核心方法，根据勾选的模式进行过滤
         /// </summary>
-        //private async Task TryAutoPreliminaryAsync()
-        //{
-        //    var preList = await _form.GetPreSelectedHeroesAsync();
-        //    if (!preList.Any()) return;
-
-        //    var session = await Globals.lcuClient.GetChampSelectSession();
-        //    if (session == null) return;
-
-        //    int queueId = session["queueId"]?.Value<int>() ?? 0;
-
-        //    if (queueId == 450 || queueId == 2400) // ARAM 大乱斗、洛克斯大乱斗
-        //    {
-        //        // 完全移除 _hasSwappedInAram 判断！一直抢！
-        //        await Globals.lcuClient.AutoSwapToHighestPriorityAsync(preList);
-        //        return;
-        //    }
-
-        //    // 普通模式保持原样
-        //    if (_hasAutoPreliminated) return;
-        //    bool successNormal = await Globals.lcuClient.AutoDeclareIntentAsync(preList);
-        //    if (successNormal) _hasAutoPreliminated = true;
-        //}
-
-        //自动预选功能核心方法，新增根据勾选的模式进行过滤
         private async Task TryAutoPreliminaryAsync()
         {
             // 先检查全局是否启用自动预选

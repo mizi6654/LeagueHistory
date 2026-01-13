@@ -982,7 +982,7 @@ namespace League.Infrastructure
             AddDescription("冰寒", "你的减速效果可降低更多移动速度。");
             AddDescription("炼狱龙魂", "你获得炼狱龙魂。");
             AddDescription("练腿日", "获得移动速度和减速抗性。");
-            AddDescription("由心及物", "使你的最大生命值提升，数额相当于你一半的法务值。");
+            AddDescription("由心及物", "使你的最大生命值提升，数额相当于你一半的法力值。");
             AddDescription("海洋龙魂", "获得【海洋龙魂】。");
             AddDescription("退敌力场", "在你较低或低生命值时，附近的敌人们会被击退。");
             AddDescription("万用瞄准镜", "获得一定攻击距离(远程英雄获得的攻击距离会降低)。");

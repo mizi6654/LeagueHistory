@@ -65,7 +65,7 @@ namespace League
             _uiManager = new FormUiStateManager(this);
             _matchQueryProcessor = new MatchQueryProcessor();
             _playerCardManager = new PlayerCardManager(this, _matchQueryProcessor);
-            _gameFlowWatcher = new GameFlowWatcher(this, _uiManager, _playerCardManager);
+            _gameFlowWatcher = new GameFlowWatcher(this, _uiManager, _playerCardManager, _matchQueryProcessor);
             _messageSender = new MessageSender();
             _configUpdateManager = new ConfigUpdateManager();
             _matchDetailManager = new MatchDetailManager(this);

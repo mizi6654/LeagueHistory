@@ -178,6 +178,32 @@ namespace League.Managers
                 maxConcurrency: 3
             );
 
+            // 强制检查每个位置，确保不留空白
+            for (int col = 0; col < team.Count; col++)
+            {
+                var posKey = (row, col);
+                if (!playerCache.TryGetValue(posKey, out var cached)) continue;
+
+                long sid = cached.summonerId;
+                int cid = cached.championId;
+
+                if (_form.tableLayoutPanel1.GetControlFromPosition(col, row) == null ||
+                    _form.tableLayoutPanel1.GetControlFromPosition(col, row).Controls.Count == 0)
+                {
+                    Debug.WriteLine($"[兜底补卡] 位置 ({row},{col}) 空白，强制补位 sid={sid}");
+
+                    var playerToken = team.FirstOrDefault(p => (long?)p["summonerId"] == sid);
+                    if (playerToken == null)
+                    {
+                        Debug.WriteLine($"[兜底失败] 找不到 sid={sid} 的原始 token，跳过补卡");
+                        continue;
+                    }
+
+                    var fallbackInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerToken);
+                    CreateLoadingPlayerMatch(fallbackInfo, isMyTeam, row, col);
+                }
+            }
+
             // 分析组队关系
             var detector = new PartyDetector();
             detector.Detect(fetchedInfos.Where(f => f != null).ToList());

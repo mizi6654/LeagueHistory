@@ -46,48 +46,60 @@ namespace League.Parsers
                 try
                 {
                     var info = await FetchPlayerMatchInfoAsync(playerData);
-                    if (info != null && info.Player.SummonerId != 0)
+
+                    // ──────────────── 关键修改在这里 ────────────────
+                    if (info != null && info.Player.IsPublic != "[失败]")
                     {
-                        return info;
+                        return info;   // 隐藏玩家也会走这里，因为 IsPublic = "隐藏" ≠ "[失败]"
                     }
+                    // ────────────────────────────────────────────────
+
+                    Debug.WriteLine($"[第{attempt}次] 未通过成功判断，IsPublic={info?.Player.IsPublic}");
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[Fetch失败] 第 {attempt} 次尝试失败: {ex.Message}");
-                    if (attempt <= retryTimes)
-                        await Task.Delay(1000);
+                    Debug.WriteLine($"[尝试 {attempt}] 异常: {ex.Message}");
+                    if (attempt <= retryTimes) await Task.Delay(800);
                 }
             }
 
-            Debug.WriteLine($"[Fetch彻底失败] summonerId={sid}，显示查询失败卡片");
+            // 所有重试失败 → 创建失败对象
+            Debug.WriteLine($"[彻底失败] sid={sid} → 显示失败卡片");
 
-            // 安全检查：如果 _playerCardManager 还没注入（极少情况），直接创建简单失败对象
-            if (_playerCardManager == null)
+            var failedInfo = _playerCardManager != null
+            ? _playerCardManager.CreateFailedPlayerInfo(sid, cid)
+            : new PlayerMatchInfo
             {
-                Debug.WriteLine("[警告] _playerCardManager 为 null，使用备用失败占位");
-                return new PlayerMatchInfo
+                Player = new PlayerInfo
                 {
-                    Player = new PlayerInfo
-                    {
-                        SummonerId = sid,
-                        ChampionId = cid,
-                        ChampionName = "查询失败",
-                        GameName = "失败",
-                        IsPublic = "[失败]",
-                        SoloRank = "失败",
-                        FlexRank = "失败",
-                        Avatar = Image.FromFile(AppDomain.CurrentDomain.BaseDirectory + "Assets\\Defaults\\Profile.png")
-                    },
-                    MatchItems = new List<ListViewItem>(),
-                    HeroIcons = new ImageList()
-                };
+                    SummonerId = sid,
+                    ChampionId = cid,
+                    ChampionName = GetChampionName(cid),
+                    Avatar = await GetChampionIconAsync(cid) ?? Image.FromFile(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\Defaults\\Profile.png")),
+                    GameName = "查询失败",
+                    IsPublic = "[失败]",
+                    SoloRank = "失败",
+                    FlexRank = "失败"
+                },
+                MatchItems = new List<ListViewItem>(),
+                HeroIcons = new ImageList()
+            };
+
+            // 然后再做隐藏判断
+            if (playerData["nameVisibilityType"]?.ToString() == "HIDDEN")
+            {
+                failedInfo.Player.GameName = "隐藏玩家";
+                failedInfo.Player.SoloRank = "隐藏";
+                failedInfo.Player.FlexRank = "隐藏";
+                failedInfo.Player.IsPublic = "隐藏";
+                // Avatar 已经有了，不用再设
             }
 
-            return _playerCardManager.CreateFailedPlayerInfo(sid, cid);
+            return failedInfo;
         }
 
         /// <summary>
-        /// 获取玩家战绩信息（核心方法） - 新增对隐藏玩家（obfuscated）的判断
+        /// 获取玩家战绩信息（核心方法） - 优先处理隐藏玩家，跳过无意义查询
         /// </summary>
         public async Task<PlayerMatchInfo> FetchPlayerMatchInfoAsync(JToken playerData)
         {
@@ -95,84 +107,73 @@ namespace League.Parsers
                 throw new ArgumentNullException(nameof(playerData));
 
             long summonerId = playerData["summonerId"]?.Value<long>() ?? 0;
-            string nameVisibility = playerData["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
             string puuid = playerData["puuid"]?.ToString() ?? "";
             int championId = playerData["championId"]?.Value<int>() ?? 0;
 
-            // 隐藏玩家直接返回
+            // 新增：优先判断是否为隐藏玩家（最快路径）
+            string nameVisibility = playerData["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
             if (nameVisibility == "HIDDEN" || summonerId == 0)
             {
-                Debug.WriteLine($"[隐藏玩家] 检测到隐藏玩家，跳过查询 (championId={championId})");
+                Debug.WriteLine($"[隐藏玩家快速路径] sid={summonerId}, champ={championId}");
+
                 return new PlayerMatchInfo
                 {
                     Player = new PlayerInfo
                     {
-                        SummonerId = 0,
+                        SummonerId = summonerId,               // 保留 0，不要设成别的
+                        Puuid = "hidden",                 // 可选，防止下游误用
                         ChampionId = championId,
                         ChampionName = GetChampionName(championId),
-                        Avatar = await GetChampionIconAsync(championId),  // 这里可以直接 await，因为外层是 async
+                        Avatar = await GetChampionIconAsync(championId),
                         GameName = "隐藏玩家",
                         SoloRank = "隐藏",
                         FlexRank = "隐藏",
-                        IsPublic = "隐藏"
+                        IsPublic = "隐藏"                    // 关键：统一用这个字符串
                     },
                     MatchItems = new List<ListViewItem>(),
                     HeroIcons = new ImageList()
                 };
             }
 
-            // 缓存命中
-            if (_playerMatchCache.TryGetValue(summonerId, out var cached))
+            // 非隐藏玩家：先查缓存（加速常见情况）
+            if (summonerId != 0 && _playerMatchCache.TryGetValue(summonerId, out var cached))
             {
+                Debug.WriteLine($"[缓存命中] 非隐藏玩家 summonerId={summonerId}");
                 cached.Player.ChampionId = championId;
                 cached.Player.ChampionName = GetChampionName(championId);
                 cached.Player.Avatar = await GetChampionIconAsync(championId);
                 return cached;
             }
 
-            // 正常玩家逻辑...
-            string gameName = "未知玩家";
+            // 下面是正常查询流程
+            string gameName = "查询失败";
             string tagLine = "";
             string privacyStatus = "隐藏";
 
-            var summonerInfo = await Globals.lcuClient.GetGameNameBySummonerId(summonerId.ToString());
-            if (summonerInfo != null)
+            // 获取召唤师信息（名字、隐私状态、puuid）
+            if (summonerId != 0)
             {
-                gameName = summonerInfo["gameName"]?.ToString() ?? "未知玩家";
-                tagLine = summonerInfo["tagLine"]?.ToString() ?? "";
-                privacyStatus = summonerInfo["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) == true
-                    ? "公开" : "隐藏";
-
-                var realPuuid = summonerInfo["puuid"]?.ToString();
-                if (!string.IsNullOrEmpty(realPuuid))
-                    puuid = realPuuid;
+                var summonerInfo = await Globals.lcuClient.GetGameNameBySummonerId(summonerId.ToString());
+                if (summonerInfo != null)
+                {
+                    gameName = summonerInfo["gameName"]?.ToString() ?? "未知玩家";
+                    tagLine = summonerInfo["tagLine"]?.ToString() ?? "";
+                    privacyStatus = summonerInfo["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) ?? false
+                        ? "公开" : "隐藏";
+                    puuid = summonerInfo["puuid"]?.ToString() ?? puuid; // 更新 puuid（以LCU返回为准）
+                }
             }
 
             string displayName = string.IsNullOrEmpty(tagLine) ? gameName : $"{gameName}";
 
+            // puuid 无效 → 直接失败占位（极少发生）
             if (string.IsNullOrEmpty(puuid) || puuid.Length < 10)
             {
-                Debug.WriteLine($"[战绩查询失败] puuid 无效 (summonerId={summonerId})");
-                // 直接在这里创建返回对象，不需要额外局部方法
-                return new PlayerMatchInfo
-                {
-                    Player = new PlayerInfo
-                    {
-                        SummonerId = summonerId,
-                        ChampionId = championId,
-                        ChampionName = GetChampionName(championId),
-                        Avatar = await GetChampionIconAsync(championId),
-                        GameName = displayName,
-                        SoloRank = "未知",
-                        FlexRank = "未知",
-                        IsPublic = "隐藏"
-                    },
-                    MatchItems = new List<ListViewItem>(),
-                    HeroIcons = new ImageList()
-                };
+                Debug.WriteLine($"[查询失败] puuid 无效 (summonerId={summonerId})");
+                goto Failed;
             }
 
-            // 后续查询段位、战绩...
+            // 查询段位和最近战绩
             var rankedStats = await GetRankedStatsAsync(puuid);
             string soloRank = GetFormattedRank(rankedStats, "单双排");
             string flexRank = GetFormattedRank(rankedStats, "灵活组排");
@@ -180,6 +181,7 @@ namespace League.Parsers
             var matchesJson = await GetPlayerMatchesAsync(puuid);
             var result = ParsePlayerMatchInfo(puuid, matchesJson);
 
+            // 组装最终 PlayerInfo
             result.Player = new PlayerInfo
             {
                 Puuid = puuid,
@@ -193,11 +195,36 @@ namespace League.Parsers
                 IsPublic = privacyStatus
             };
 
-            _playerMatchCache[summonerId] = result;
+            // 缓存（仅非隐藏玩家）
+            if (summonerId != 0)
+            {
+                _playerMatchCache[summonerId] = result;
+            }
+
             return result;
+
+        Failed:
+            // puuid 无效时的兜底占位
+            return new PlayerMatchInfo
+            {
+                Player = new PlayerInfo
+                {
+                    SummonerId = 0,
+                    ChampionId = championId,
+                    ChampionName = GetChampionName(championId),
+                    Avatar = await GetChampionIconAsync(championId),
+                    GameName = "查询失败",
+                    SoloRank = "未知",
+                    FlexRank = "未知",
+                    IsPublic = "[失败]"
+                },
+                MatchItems = new List<ListViewItem>(),
+                HeroIcons = new ImageList()
+            };
         }
+        #endregion
 
-
+        #region 战绩查询方法
         /// <summary>
         /// 获取玩家战绩数据，新增是否过滤模式
         /// </summary>
@@ -274,15 +301,6 @@ namespace League.Parsers
                 //Debug.WriteLine($"[模式过滤] 启用过滤，使用 {queueFilter} 查询战绩 (queueId={currentQueueId})");
                 return await Globals.sgpClient.SgpFetchLatestMatches(puuid, 0, 20, queueFilter);
             }
-        }
-
-        /// <summary>
-        /// 获取段位信息
-        /// </summary>
-        private async Task<Dictionary<string, RankedStats>> GetRankedStatsAsync(string puuid)
-        {
-            var rankedJson = await Globals.lcuClient.GetCurrentRankedStatsAsync(puuid);
-            return RankedStats.FromJson(rankedJson);
         }
         #endregion
 
@@ -493,6 +511,15 @@ namespace League.Parsers
 
         #region 辅助方法
         /// <summary>
+        /// 获取段位信息
+        /// </summary>
+        private async Task<Dictionary<string, RankedStats>> GetRankedStatsAsync(string puuid)
+        {
+            var rankedJson = await Globals.lcuClient.GetCurrentRankedStatsAsync(puuid);
+            return RankedStats.FromJson(rankedJson);
+        }
+
+        /// <summary>
         /// 获取格式化段位
         /// </summary>
         private string GetFormattedRank(Dictionary<string, RankedStats> rankedStats, string queueType)
@@ -518,6 +545,13 @@ namespace League.Parsers
         private async Task<Image> GetChampionIconAsync(int championId)
         {
             return await Globals.resLoading.GetChampionIconAsync(championId);
+        }
+
+        // 新增：供外部调用清空玩家战绩缓存
+        public void ClearPlayerMatchCache()
+        {
+            _playerMatchCache.Clear();
+            Debug.WriteLine("[缓存清理] MatchQueryProcessor 的玩家战绩缓存已清空");
         }
         #endregion
     }
