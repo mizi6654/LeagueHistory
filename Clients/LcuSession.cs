@@ -1,805 +1,285 @@
 ﻿using League.PrimaryElection;
 using Newtonsoft.Json.Linq;
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Management;
-using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Security;
-using System.Text;
-using System.Text.RegularExpressions;
 
 namespace League.Clients
 {
+    /// <summary>
+    /// LCU会话管理器 - 提供向后兼容的接口
+    /// </summary>
     public class LcuSession
     {
-        private HttpClient _lcuClient;
+        private LcuClient _lcuClient;
+        private LcuConnector _connector;
 
-        private string _lcuPort;
+        // 服务实例
+        private SummonerService _summonerService;
+        private MatchService _matchService;
+        private RankedService _rankedService;
+        private GameflowService _gameflowService;
+        private ReplayService _replayService;
+        private ChampionSelectService _championSelectService;
 
-        private string _lcuToken;
+        /// <summary>
+        /// 获取HTTP客户端（保持向后兼容）
+        /// </summary>
+        public HttpClient Client => _lcuClient?.HttpClient;
 
-        private readonly Queue<long> _responseTimeHistory = new Queue<long>();
+        public LcuSession()
+        {
+            _connector = new LcuConnector();
+        }
 
-        private const int MaxHistorySize = 5;
-
-        private readonly SemaphoreSlim _concurrencySemaphore = new SemaphoreSlim(6);
-
-        private static readonly ConcurrentDictionary<string, JObject> _summonerCache = new ConcurrentDictionary<string, JObject>();
-
-        public HttpClient Client => _lcuClient;
-
+        /// <summary>
+        /// 初始化LCU连接
+        /// </summary>
         public async Task<bool> InitializeAsync()
         {
-            string port = null;
-            string token = null;
-            for (int i = 0; i < 10; i++)
+            var (success, port, token) = await _connector.InitializeAsync();
+
+            if (!success)
             {
-                Process proc = Process.GetProcessesByName("LeagueClientUx").FirstOrDefault();
-                if (proc != null)
-                {
-                    string cmdLine = GetCommandLine(proc);
-                    port = ExtractArgument(cmdLine, "--app-port=");
-                    token = ExtractArgument(cmdLine, "--remoting-auth-token=");
-                    if (!string.IsNullOrEmpty(port))
-                    {
-                        port = port.Trim().Trim('"', '\'', ' ', '\r', '\n');
-                    }
-                    if (!string.IsNullOrEmpty(token))
-                    {
-                        token = token.Trim().Trim('"', '\'', ' ', '\r', '\n');
-                    }
-                    if (!int.TryParse(port, out var portNumber) || portNumber < 1 || portNumber > 65535)
-                    {
-                        Debug.WriteLine("[LCU] 提取到的端口不合法: " + port);
-                        return false;
-                    }
-                    if (!string.IsNullOrEmpty(port) && !string.IsNullOrEmpty(token))
-                    {
-                        //Debug.WriteLine("[LCU] 找到参数 → Port: " + port + ", Token: " + token);
-                        break;
-                    }
-                    //Debug.WriteLine("[LCU] LeagueClientUx 启动了，但参数暂时为空，等待重试...");
-                }
-                else
-                {
-                    Debug.WriteLine("[LCU] LeagueClientUx 尚未启动，等待...");
-                }
-                await Task.Delay(1000);
-            }
-            if (string.IsNullOrEmpty(port) || string.IsNullOrEmpty(token))
-            {
-                Debug.WriteLine("[LCU] 多次重试后仍未获取到 LCU 参数");
+                Debug.WriteLine("[LCU] 连接初始化失败");
                 return false;
             }
-            _lcuPort = port;
-            _lcuToken = token;
-            //Debug.WriteLine("Authorization: Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes("riot:" + token)));
-            SocketsHttpHandler handler = new SocketsHttpHandler
-            {
-                UseProxy = false,
-                PooledConnectionLifetime = TimeSpan.Zero,
-                PooledConnectionIdleTimeout = TimeSpan.Zero,
-                MaxConnectionsPerServer = int.MaxValue,
-                EnableMultipleHttp2Connections = true,
-                ConnectTimeout = TimeSpan.FromSeconds(3.0),
-                UseCookies = false,
-                AllowAutoRedirect = false,
-                SslOptions = new SslClientAuthenticationOptions
-                {
-                    RemoteCertificateValidationCallback = (sender, cert, chain, errors) => true
-                }
-            };
-            _lcuClient?.Dispose();
-            _lcuClient = new HttpClient(handler)
-            {
-                DefaultRequestVersion = HttpVersion.Version11,
-                DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact
-            };
-            _lcuClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes("riot:" + token)));
-            _lcuClient.BaseAddress = new Uri("https://127.0.0.1:" + port + "/");
+
             try
             {
-                using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(10.0));
-                HttpResponseMessage response = await _lcuClient.GetAsync("lol-summoner/v1/current-summoner", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                // 创建LCU客户端
+                _lcuClient = new LcuClient(port, token);
+
+                // 初始化各个服务
+                InitializeServices();
+
+                // 测试连接
+                return await TestConnectionAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[LCU] 初始化异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 初始化所有服务
+        /// </summary>
+        private void InitializeServices()
+        {
+            _gameflowService = new GameflowService(_lcuClient);
+            _summonerService = new SummonerService(_lcuClient);
+            _matchService = new MatchService(_lcuClient);
+            _rankedService = new RankedService(_lcuClient);
+            _replayService = new ReplayService(_lcuClient);
+            _championSelectService = new ChampionSelectService(_lcuClient, _gameflowService);
+        }
+
+        /// <summary>
+        /// 测试LCU连接
+        /// </summary>
+        private async Task<bool> TestConnectionAsync()
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var response = await _lcuClient.GetAsync("/lol-summoner/v1/current-summoner");
+
                 if (response.IsSuccessStatusCode)
                 {
                     Debug.WriteLine("[LCU] 初始化成功，已连接 LCU API");
                     return true;
                 }
+
                 Debug.WriteLine($"[LCU] LCU 返回异常状态码: {response.StatusCode}");
+                return false;
             }
             catch (TaskCanceledException ex)
             {
-                Debug.WriteLine("[LCU] 请求超时: " + ex.Message);
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return false;
             }
-            catch (Exception value)
+            catch (Exception ex)
             {
-                Debug.WriteLine($"[LCU] 其他异常: {value}");
+                Debug.WriteLine($"[LCU] 其他异常: {ex}");
+                return false;
             }
-            return false;
         }
 
-        private string GetCommandLine(Process process)
-        {
-            using ManagementObjectSearcher searcher = new ManagementObjectSearcher($"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {process.Id}");
-            using (ManagementObjectCollection.ManagementObjectEnumerator managementObjectEnumerator = searcher.Get().GetEnumerator())
-            {
-                if (managementObjectEnumerator.MoveNext())
-                {
-                    ManagementObject obj = (ManagementObject)managementObjectEnumerator.Current;
-                    return obj["CommandLine"]?.ToString() ?? "";
-                }
-            }
-            return "";
-        }
+        #region 向后兼容的方法包装器
 
-        private string ExtractArgument(string cmdLine, string key)
-        {
-            Match match = Regex.Match(cmdLine, key + "([^ ]+)");
-            return match.Success ? match.Groups[1].Value : null;
-        }
-
+        /// <summary>
+        /// 根据玩家的名称查询返回个人信息
+        /// </summary>
         public async Task<JObject> GetSummonerByNameAsync(string summonerName)
         {
-            try
-            {
-                HttpResponseMessage response = await _lcuClient.GetAsync("/lol-summoner/v1/summoners?name=" + Uri.EscapeDataString(summonerName));
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
-                return JObject.Parse(await response.Content.ReadAsStringAsync());
-            }
-            catch (TaskCanceledException ex)
-            {
-                TaskCanceledException ex2 = ex;
-                Debug.WriteLine("[LCU] 请求超时: " + ex2.Message);
-                return null;
-            }
-            catch (Exception ex3)
-            {
-                Exception ex4 = ex3;
-                Debug.WriteLine($"查询异常：{ex4}");
-                return null;
-            }
+            return await _summonerService.GetSummonerByNameAsync(summonerName);
         }
 
+        /// <summary>
+        /// 根据summonerId查询玩家的名称等信息
+        /// </summary>
         public async Task<JObject> GetGameNameBySummonerId(string summonerId)
         {
-            if (string.IsNullOrEmpty(summonerId))
-            {
-                return null;
-            }
-            if (_summonerCache.TryGetValue(summonerId, out JObject cached))
-            {
-                return cached;
-            }
-            try
-            {
-                HttpResponseMessage response = await _lcuClient.GetAsync("/lol-summoner/v1/summoners/" + summonerId);
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
-                JObject obj = JObject.Parse(await response.Content.ReadAsStringAsync());
-                _summonerCache[summonerId] = obj;
-                return obj;
-            }
-            catch (TaskCanceledException ex)
-            {
-                Debug.WriteLine("[LCU] 请求超时: " + ex.Message);
-                return null;
-            }
-            catch (Exception value)
-            {
-                Debug.WriteLine($"ID查询异常：{value}");
-                return null;
-            }
+            return await _summonerService.GetSummonerByIdAsync(summonerId);
         }
 
+        /// <summary>
+        /// 获取当前登录玩家的等级隐私信息
+        /// </summary>
         public async Task<JObject> GetCurrentSummoner()
         {
-            try
-            {
-                HttpResponseMessage response = await _lcuClient.GetAsync("/lol-summoner/v1/current-summoner");
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
-                return JObject.Parse(await response.Content.ReadAsStringAsync());
-            }
-            catch (TaskCanceledException ex)
-            {
-                TaskCanceledException ex2 = ex;
-                Debug.WriteLine("[LCU] 请求超时: " + ex2.Message);
-                return new JObject();
-            }
-            catch (Exception ex3)
-            {
-                Exception ex4 = ex3;
-                Debug.WriteLine($"获取段位失败: {ex4}");
-                return new JObject();
-            }
+            return await _summonerService.GetCurrentSummonerAsync();
         }
 
-        public async Task<JObject> GetSummonerByPuuidAsync(string puuid)
-        {
-            try
-            {
-                HttpResponseMessage response = await _lcuClient.GetAsync($"/lol-summoner/v1/summoners-by-puuid/{puuid}");
-                if (!response.IsSuccessStatusCode)
-                {
-                    Debug.WriteLine($"[LCU] GetSummonerByPuuid 失败: {response.StatusCode}");
-                    return null;
-                }
-                return JObject.Parse(await response.Content.ReadAsStringAsync());
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[LCU] GetSummonerByPuuid 异常: {ex.Message}");
-                return null;
-            }
-        }
-
-        public async Task<JArray> FetchMatchesWithRetry(string puuid, int begIndex, int endIndex, bool isPreheat = false)
-        {
-            int maxRetries = isPreheat ? 1 : 3;
-            int attempt = 0;
-            while (attempt < maxRetries)
-            {
-                attempt++;
-                CancellationTokenSource cts = null;
-                Debug.WriteLine($"[{puuid}] 第{attempt}次尝试，等待信号量...");
-                await _concurrencySemaphore.WaitAsync();
-                Debug.WriteLine("[" + puuid + "] 获取到信号量，开始请求");
-                try
-                {
-                    int timeoutSeconds = attempt == 1 ? 2 : 4;
-                    cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-                    string path = $"lol-match-history/v1/products/lol/{puuid}/matches?begIndex={begIndex}&endIndex={endIndex}";
-                    Debug.WriteLine("[正常请求] " + path);
-                    Stopwatch watch = Stopwatch.StartNew();
-                    HttpResponseMessage response = await _lcuClient.GetAsync(path, cts.Token);
-                    watch.Stop();
-                    if (response.IsSuccessStatusCode)
-                    {
-                        string content = await response.Content.ReadAsStringAsync();
-                        if (!isPreheat)
-                        {
-                            UpdateResponseTimeHistory(watch.ElapsedMilliseconds);
-                            Debug.WriteLine($"[正常请求] （默认返回{endIndex}场）耗时: {watch.ElapsedMilliseconds}ms");
-                        }
-                        JObject json = JObject.Parse(content);
-                        return json["games"]?["games"] as JArray;
-                    }
-                    Debug.WriteLine($"[响应失败] {response.StatusCode}，已使用缓存接口（忽略分页）");
-                }
-                catch (TaskCanceledException)
-                {
-                    Debug.WriteLine($"第{attempt}次请求超时（使用缓存接口）");
-                    if (isPreheat)
-                    {
-                        break;
-                    }
-                }
-                catch (Exception ex2)
-                {
-                    Exception ex3 = ex2;
-                    Debug.WriteLine("请求异常（使用缓存接口）: " + ex3.Message);
-                }
-                finally
-                {
-                    _concurrencySemaphore.Release();
-                    cts?.Dispose();
-                }
-            }
-            return null;
-        }
-
-        public async Task<JArray> FetchLatestMatches(string puuid, bool isPreheat = false)
-        {
-            int[] retryDelays = new int[2] { 10, 15 };
-            for (int i = 0; i < retryDelays.Length; i++)
-            {
-                TimeSpan timeout = TimeSpan.FromSeconds(retryDelays[i]);
-                using (CancellationTokenSource cts = new CancellationTokenSource(timeout))
-                {
-                    try
-                    {
-                        using HttpResponseMessage response = await _lcuClient.GetAsync("lol-match-history/v1/products/lol/" + puuid + "/matches", HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(continueOnCapturedContext: false);
-                        response.EnsureSuccessStatusCode();
-                        JObject json = JObject.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(continueOnCapturedContext: false));
-                        return json["games"]?["games"] as JArray;
-                    }
-                    catch (TaskCanceledException)
-                    {
-                        Debug.WriteLine($"[Fetch超时] {puuid} 超过 {retryDelays[i]} 秒未响应");
-                    }
-                    catch (Exception ex2)
-                    {
-                        Exception ex3 = ex2;
-                        Debug.WriteLine($"[第{i + 1}次尝试失败] 异常: {ex3.Message}");
-                    }
-                }
-                if (i < retryDelays.Length - 1)
-                {
-                    Debug.WriteLine($"[等待重试] 即将进行第{i + 2}次尝试");
-                    await Task.Delay(1000);
-                }
-            }
-            return null;
-        }
-
-        public async Task<JObject> GetFullMatchByGameIdAsync(long gameId)
-        {
-            try
-            {
-                HttpResponseMessage response = await _lcuClient.GetAsync($"/lol-match-history/v1/games/{gameId}");
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
-                return JObject.Parse(await response.Content.ReadAsStringAsync());
-            }
-            catch (TaskCanceledException ex)
-            {
-                TaskCanceledException ex2 = ex;
-                Debug.WriteLine("[LCU] 请求超时: " + ex2.Message);
-                return null;
-            }
-            catch (Exception ex3)
-            {
-                Exception ex4 = ex3;
-                Debug.WriteLine("获取完整对战信息失败：" + ex4.Message);
-                return null;
-            }
-        }
-
+        /// <summary>
+        /// 获取当前排位统计数据
+        /// </summary>
         public async Task<JObject> GetCurrentRankedStatsAsync(string puuid)
         {
-            try
-            {
-                return JObject.Parse(await (await _lcuClient.GetAsync("/lol-ranked/v1/ranked-stats/" + puuid)).Content.ReadAsStringAsync());
-            }
-            catch (TaskCanceledException ex)
-            {
-                TaskCanceledException ex2 = ex;
-                Debug.WriteLine("[LCU] 请求超时: " + ex2.Message);
-                return new JObject();
-            }
-            catch (Exception ex3)
-            {
-                Exception ex4 = ex3;
-                Debug.WriteLine($"获取段位失败: {ex4}");
-                return new JObject();
-            }
+            return await _rankedService.GetCurrentRankedStatsAsync(puuid);
         }
 
+        // ============ 游戏流程相关方法 ============
+
+        /// <summary>
+        /// 获取游戏流程阶段
+        /// </summary>
         public async Task<string> GetGameflowPhase()
         {
-            try
-            {
-                HttpResponseMessage response = await _lcuClient.GetAsync("/lol-gameflow/v1/gameflow-phase");
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
-                return (await response.Content.ReadAsStringAsync()).Trim().Trim('"');
-            }
-            catch (TaskCanceledException ex)
-            {
-                TaskCanceledException ex2 = ex;
-                Debug.WriteLine("[LCU] 请求超时: " + ex2.Message);
-                return null;
-            }
-            catch (Exception ex3)
-            {
-                Exception ex4 = ex3;
-                Debug.WriteLine($"获取游戏阶段失败: {ex4}");
-                return null;
-            }
+            return await _gameflowService.GetGameflowPhaseAsync();
         }
 
+        /// <summary>
+        /// 获取英雄选择会话信息
+        /// </summary>
         public async Task<JObject> GetChampSelectSession()
         {
-            try
-            {
-                HttpResponseMessage response = await _lcuClient.GetAsync("/lol-champ-select/v1/session");
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
-                return JObject.Parse(await response.Content.ReadAsStringAsync());
-            }
-            catch (TaskCanceledException ex)
-            {
-                TaskCanceledException ex2 = ex;
-                Debug.WriteLine("[LCU] 请求超时: " + ex2.Message);
-                return new JObject();
-            }
-            catch (Exception ex3)
-            {
-                Exception ex4 = ex3;
-                Debug.WriteLine($"获取选人阶段数据失败: {ex4}");
-                return new JObject();
-            }
-        }
-
-        public async Task<bool> SkipHonorAsync()
-        {
-            try
-            {
-                HttpResponseMessage response =
-                    await _lcuClient.PostAsync("/lol-end-of-game/v1/skip-honor", null);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    Debug.WriteLine("[LCU] skip-honor 调用失败: " + response.StatusCode);
-                    return false;
-                }
-
-                Debug.WriteLine("[LCU] 已成功跳过点赞结算");
-                return true;
-            }
-            catch (TaskCanceledException ex)
-            {
-                Debug.WriteLine("[LCU] skip-honor 请求超时: " + ex.Message);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("[LCU] skip-honor 异常: " + ex);
-                return false;
-            }
+            return await _gameflowService.GetChampSelectSessionAsync();
         }
 
         /// <summary>
         /// 返回完整的游戏信息，包括 queueId！
         /// </summary>
-        /// <returns></returns>
         public async Task<JObject> GetGameSession()
         {
-            try
-            {
-                HttpResponseMessage response = await _lcuClient.GetAsync("/lol-gameflow/v1/session");
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
-                return JObject.Parse(await response.Content.ReadAsStringAsync());
-            }
-            catch (TaskCanceledException ex)
-            {
-                TaskCanceledException ex2 = ex;
-                Debug.WriteLine("[LCU] 请求超时: " + ex2.Message);
-                return new JObject();
-            }
-            catch (Exception ex3)
-            {
-                Exception ex4 = ex3;
-                Debug.WriteLine($"获取游戏会话失败: {ex4}");
-                return new JObject();
-            }
-        }
-        
-        private void UpdateResponseTimeHistory(long elapsedMs)
-        {
-            _responseTimeHistory.Enqueue(elapsedMs);
-            if (_responseTimeHistory.Count > 5)
-            {
-                _responseTimeHistory.Dequeue();
-            }
+            return await _gameflowService.GetGameSessionAsync();
         }
 
+        /// <summary>
+        /// 下载游戏回放
+        /// </summary>
         public async Task<bool> DownloadReplayAsync(long gameId, string contextData = "match-history")
         {
-            try
-            {
-                Debug.WriteLine($"[回放] 开始下载回放，GameId: {gameId}");
-                (bool exists, bool isValid) existingCheck = await CheckExistingReplay(gameId);
-                if (existingCheck.exists && existingCheck.isValid)
-                {
-                    Debug.WriteLine("[回放] 回放已存在且有效，跳过下载");
-                    return true;
-                }
-                JObject jsonObj = new JObject { ["contextData"] = contextData };
-                StringContent postContent = new StringContent(jsonObj.ToString(), Encoding.UTF8, "application/json");
-                HttpResponseMessage dlResp = await _lcuClient.PostAsync($"/lol-replays/v1/rofls/{gameId}/download", postContent);
-                Debug.WriteLine($"[回放] 下载请求响应: {dlResp.StatusCode}");
-                if (!dlResp.IsSuccessStatusCode && dlResp.StatusCode != HttpStatusCode.NoContent && dlResp.StatusCode != HttpStatusCode.Accepted)
-                {
-                    Debug.WriteLine("[回放] 下载请求失败");
-                    return false;
-                }
-                return await WaitForDownloadComplete(gameId);
-            }
-            catch (Exception ex)
-            {
-                Exception ex2 = ex;
-                Debug.WriteLine($"[回放] 下载异常: {ex2}");
-                return false;
-            }
+            return await _replayService.DownloadReplayAsync(gameId, contextData);
         }
 
+        /// <summary>
+        /// 播放游戏回放
+        /// </summary>
         public async Task<bool> PlayReplayAsync(long gameId, string contextData = "match-history")
         {
-            try
-            {
-                Debug.WriteLine($"[回放] 尝试播放回放，GameId: {gameId}");
-                JObject jsonObj = new JObject { ["contextData"] = contextData };
-                StringContent postContent = new StringContent(jsonObj.ToString(), Encoding.UTF8, "application/json");
-                HttpResponseMessage watchResp = await _lcuClient.PostAsync($"/lol-replays/v1/rofls/{gameId}/watch", postContent);
-                if (watchResp.IsSuccessStatusCode)
-                {
-                    Debug.WriteLine("[回放] 播放请求成功");
-                    return true;
-                }
-                string respText = await watchResp.Content.ReadAsStringAsync();
-                Debug.WriteLine($"[回放] 播放失败: {watchResp.StatusCode} {respText}");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Exception ex2 = ex;
-                Debug.WriteLine($"[回放] 播放异常: {ex2}");
-                return false;
-            }
+            return await _replayService.PlayReplayAsync(gameId, contextData);
         }
 
-        private async Task<(bool exists, bool isValid)> CheckExistingReplay(long gameId)
-        {
-            try
-            {
-                HttpResponseMessage metaResp = await _lcuClient.GetAsync($"/lol-replays/v1/metadata/{gameId}");
-                if (metaResp.IsSuccessStatusCode)
-                {
-                    JObject metaJson = JObject.Parse(await metaResp.Content.ReadAsStringAsync());
-                    string state = metaJson["state"]?.ToString()?.ToLowerInvariant() ?? "";
-                    int progress = metaJson["downloadProgress"]?.Value<int>() ?? 0;
-                    Debug.WriteLine($"[回放] 现有metadata状态: {state}, 进度: {progress}%");
-                    return (exists: true, isValid: state == "watch" && progress >= 100);
-                }
-                return (exists: false, isValid: false);
-            }
-            catch (Exception ex)
-            {
-                Exception ex2 = ex;
-                Debug.WriteLine("[回放] 检查现有回放异常: " + ex2.Message);
-                return (exists: false, isValid: false);
-            }
-        }
-
-        private async Task<bool> WaitForDownloadComplete(long gameId)
-        {
-            Stopwatch sw = Stopwatch.StartNew();
-            int timeoutMs = 90000;
-            while (sw.ElapsedMilliseconds < timeoutMs)
-            {
-                await Task.Delay(2000);
-                try
-                {
-                    HttpResponseMessage metaResp = await _lcuClient.GetAsync($"/lol-replays/v1/metadata/{gameId}");
-                    if (metaResp.IsSuccessStatusCode)
-                    {
-                        JObject metaJson = JObject.Parse(await metaResp.Content.ReadAsStringAsync());
-                        string state = metaJson["state"]?.ToString()?.ToLowerInvariant() ?? "";
-                        int progress = metaJson["downloadProgress"]?.Value<int>() ?? 0;
-                        Debug.WriteLine($"[回放] 下载状态: {state}, 进度: {progress}%");
-                        if (state == "watch" && progress >= 100)
-                        {
-                            Debug.WriteLine("[回放] 下载完成");
-                            return true;
-                        }
-                        if (state == "failed" || state == "error")
-                        {
-                            Debug.WriteLine("[回放] 下载失败");
-                            return false;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine("[回放] 状态查询异常: " + ex.Message);
-                }
-            }
-            Debug.WriteLine("[回放] 下载超时");
-            return false;
-        }
-
-        #region 匹配，排位英雄自动预选
         /// <summary>
         /// 自动预选英雄（根据优先级列表）
         /// </summary>
-        /// <param name="preSelectedHeroes">按优先级排序的预选英雄列表（Priority 越小越优先）</param>
-        /// <returns>是否成功预选了一个英雄</returns>
         public async Task<bool> AutoDeclareIntentAsync(List<PreliminaryHero> preSelectedHeroes)
         {
-            Debug.WriteLine($"[LCU 自动预选] 开始执行，列表 {preSelectedHeroes.Count} 个英雄");
-
-            if (preSelectedHeroes == null || !preSelectedHeroes.Any())
-                return false;
-
-            try
-            {
-                var session = await GetChampSelectSession();
-                if (session == null || session["actions"] == null)
-                    return false;
-
-                // 获取自己的 pick action（未完成的）
-                var actions = session["actions"] as JArray;
-                var myPickAction = actions
-                    .SelectMany(a => a as JArray)
-                    .FirstOrDefault(a =>
-                        a["actorCellId"]?.Value<long>() == session["localPlayerCellId"]?.Value<long>() &&
-                        a["type"]?.ToString() == "pick" &&
-                        a["completed"]?.Value<bool>() != true);
-
-                if (myPickAction == null)
-                    return false;
-
-                int actionId = myPickAction["id"]?.Value<int>() ?? 0;
-                if (actionId == 0)
-                    return false;
-
-                // 获取已 ban 和已选英雄
-                var bannedChampIds = new HashSet<int>(
-                    (session["bans"]?["myTeamBans"] as JArray ?? new JArray())
-                        .Select(t => t.Value<int>())
-                        .Concat(
-                            (session["bans"]?["theirTeamBans"] as JArray ?? new JArray())
-                                .Select(t => t.Value<int>())
-                        )
-                );
-
-                // 我方已选英雄
-                var myTeam = session["myTeam"] as JArray ?? new JArray();
-                foreach (var player in myTeam)
-                {
-                    int champId = player["championId"]?.Value<int>() ?? 0;
-                    if (champId > 0) bannedChampIds.Add(champId);
-                }
-
-                // 找第一个可用英雄
-                var availableHero = preSelectedHeroes
-                    .FirstOrDefault(h => !bannedChampIds.Contains(h.ChampionId));
-
-                if (availableHero == null)
-                {
-                    Debug.WriteLine("[自动预选] 所有预选英雄均已被禁或已选");
-                    return false;
-                }
-
-                // 检查是否已经 hover 了这个英雄
-                int currentHoverId = myPickAction["championId"]?.Value<int>() ?? 0;
-                if (currentHoverId == availableHero.ChampionId)
-                    return false; // 已经预选，无需重复
-
-                // 执行预选
-                var patchBody = new JObject { ["championId"] = availableHero.ChampionId };
-                var response = await PatchAsync($"/lol-champ-select/v1/session/actions/{actionId}", patchBody);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    Debug.WriteLine($"[自动预选] 成功预选: {availableHero.ChampionName} (ID: {availableHero.ChampionId})");
-                    return true;
-                }
-                else
-                {
-                    Debug.WriteLine($"[自动预选] 请求失败: {response.StatusCode}");
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[自动预选] 执行异常: {ex.Message}");
-                return false;
-            }
+            return await _championSelectService.AutoDeclareIntentAsync(preSelectedHeroes);
         }
 
-        public async Task<HttpResponseMessage> PatchAsync(string requestUri, JObject content)
-        {
-            try
-            {
-                var request = new HttpRequestMessage(new HttpMethod("PATCH"), requestUri)
-                {
-                    Content = new StringContent(content.ToString(), Encoding.UTF8, "application/json")
-                };
-                return await _lcuClient.SendAsync(request);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[LCU Patch] 异常: {ex.Message}");
-                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
-            }
-        }
-        #endregion
-
-        #region ARAM 大乱斗自动抢英雄（极致贪婪版）
         /// <summary>
-        /// ARAM 模式下无条件抢取 bench 中优先级最高的预选英雄
-        /// 直到拿到列表中最高优先级的为止，绝不停止
+        /// ARAM 大乱斗自动抢英雄（极致贪婪版）
         /// </summary>
         public async Task AutoSwapToHighestPriorityAsync(List<PreliminaryHero> preSelectedHeroes)
         {
-            if (preSelectedHeroes == null || !preSelectedHeroes.Any())
-                return;
+            await _championSelectService.AutoSwapToHighestPriorityAsync(preSelectedHeroes);
+        }
 
-            try
-            {
-                var session = await GetChampSelectSession();
-                if (session == null) return;
+        /// <summary>
+        /// 查询历史战绩，带分页
+        /// </summary>
+        public async Task<JArray> FetchMatchesWithRetry(string puuid, int begIndex, int endIndex, bool isPreheat = false)
+        {
+            return await _matchService.FetchMatchesWithRetryAsync(puuid, begIndex, endIndex, isPreheat);
+        }
 
-                int queueId = session["queueId"]?.Value<int>() ?? 0;
-                if (queueId != 450 && queueId != 2400) return;  // 只有非ARAM模式才返回
+        /// <summary>
+        /// 查询历史战绩，不分页，默认返回20局记录
+        /// </summary>
+        public async Task<JArray> FetchLatestMatches(string puuid, bool isPreheat = false)
+        {
+            return await _matchService.FetchLatestMatchesAsync(puuid, isPreheat);
+        }
 
-                int myCellId = session["localPlayerCellId"]?.Value<int>() ?? -1;
-                if (myCellId == -1) return;
-
-                var myTeam = session["myTeam"] as JArray ?? new JArray();
-                var myPlayer = myTeam.FirstOrDefault(p => p["cellId"]?.Value<int>() == myCellId);
-                int currentChampId = myPlayer?["championId"]?.Value<int>() ?? 0;
-                if (currentChampId == 0) return;
-
-                int currentPriority = preSelectedHeroes
-                    .FirstOrDefault(h => h.ChampionId == currentChampId)
-                    ?.Priority ?? int.MaxValue;
-
-                // bench 中所有可用英雄
-                var benchChampions = session["benchChampions"] as JArray ?? new JArray();
-                var availableChampIds = new HashSet<int>();
-                foreach (var item in benchChampions)
-                {
-                    int id = item["championId"]?.Value<int>() ?? 0;
-                    if (id > 0) availableChampIds.Add(id);
-                }
-
-                // 找出 bench 中优先级最高的预选英雄
-                var bestAvailable = preSelectedHeroes
-                    .Where(h => availableChampIds.Contains(h.ChampionId))
-                    .OrderBy(h => h.Priority)
-                    .FirstOrDefault();
-
-                if (bestAvailable == null) return;
-
-                // 只有当 bench 中的最高优先级 严格高于 当前持有，才抢
-                if (bestAvailable.Priority < currentPriority)
-                {
-                    var response = await PostAsync($"/lol-champ-select/v1/session/bench/swap/{bestAvailable.ChampionId}");
-                    if (response.IsSuccessStatusCode)
-                    {
-                        //Debug.WriteLine($"[ARAM 贪婪抢] 成功换到 {bestAvailable.ChampionName} (Priority: {bestAvailable.Priority}) ← 当前 {currentPriority}");
-                        await Task.Delay(100); // 稍微延时，避免API过于频繁
-                    }
-                }
-                // else: 当前已是最高，或 bench 没有更好的 → 什么都不做，继续等
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[ARAM 贪婪抢] 异常: {ex.Message}");
-            }
+        /// <summary>
+        /// 获取历史战绩详情信息
+        /// </summary>
+        public async Task<JObject> GetFullMatchByGameIdAsync(long gameId)
+        {
+            return await _matchService.GetFullMatchByGameIdAsync(gameId);
         }
         #endregion
 
+        #region 新方法 - 获取服务实例
+
         /// <summary>
-        /// 通用的 POST 请求封装（已在前一个回复中添加，这里确保完整）
+        /// 获取召唤师服务实例
         /// </summary>
-        public async Task<HttpResponseMessage> PostAsync(string requestUri, JObject content = null)
+        public SummonerService GetSummonerService()
         {
-            try
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, requestUri);
-                if (content != null)
-                {
-                    request.Content = new StringContent(content.ToString(), Encoding.UTF8, "application/json");
-                }
-                return await _lcuClient.SendAsync(request);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[LCU Post] 异常: {ex.Message}");
-                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
-            }
+            return _summonerService;
+        }
+
+        /// <summary>
+        /// 获取对战记录服务实例
+        /// </summary>
+        public MatchService GetMatchService()
+        {
+            return _matchService;
+        }
+
+        /// <summary>
+        /// 获取排位服务实例
+        /// </summary>
+        public RankedService GetRankedService()
+        {
+            return _rankedService;
+        }
+
+        /// <summary>
+        /// 获取游戏流程服务实例
+        /// </summary>
+        public GameflowService GetGameflowService()
+        {
+            return _gameflowService;
+        }
+
+        /// <summary>
+        /// 获取回放服务实例
+        /// </summary>
+        public ReplayService GetReplayService()
+        {
+            return _replayService;
+        }
+
+        /// <summary>
+        /// 获取英雄选择服务实例
+        /// </summary>
+        public ChampionSelectService GetChampionSelectService()
+        {
+            return _championSelectService;
+        }
+
+        #endregion
+
+        /// <summary>
+        /// 释放资源
+        /// </summary>
+        public void Dispose()
+        {
+            _lcuClient?.HttpClient?.Dispose();
         }
     }
 }
