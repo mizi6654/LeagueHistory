@@ -1,6 +1,7 @@
 ﻿using League.Controls;
 using League.Models;
 using System.Diagnostics;
+using static League.FormMain;
 
 namespace League.uitls
 {
@@ -31,6 +32,13 @@ namespace League.uitls
 
         private void CloseTab(TabPage tab)
         {
+            string? puuid = tab.Tag as string;
+            if (puuid != null && string.Equals(puuid, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show("此选项卡为自己数据，不能关闭", "提示", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+                return;
+            }
+
             if (_tabPageContents.TryGetValue(tab, out var content))
             {
                 content.Cleanup();
@@ -46,6 +54,14 @@ namespace League.uitls
         // 手动清理所有 Tab 页
         public void CleanupAllTabs()
         {
+            // 如果只剩自己 Tab，就不清理
+            if (MainTabControl.TabPages.Count == 1 &&
+                string.Equals(MainTabControl.TabPages[0].Tag as string, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase))
+            {
+                Debug.WriteLine("检测到只剩自己 Tab，跳过 CleanupAllTabs");
+                return;
+            }
+
             foreach (var tabContent in _tabPageContents.Values)
             {
                 tabContent.Cleanup();
@@ -68,28 +84,18 @@ namespace League.uitls
             string privacy, Dictionary<string, RankedStats> rankedStats)
         {
 
-            // 检查是否已存在
+            // 检查是否已存在（只检查一次）
             foreach (TabPage page in MainTabControl.TabPages)
             {
-                // 限制最大 Tab 数量
-                if (MainTabControl.TabPages.Count >= 8)
+                if (string.Equals(page.Tag as string, puuid, StringComparison.OrdinalIgnoreCase))
                 {
-                    // 关闭最旧的 Tab 页
-                    var oldestTab = MainTabControl.TabPages[0];
-                    CloseTab(oldestTab);
-                }
-
-                if (page.Tag as string == puuid)
-                {
+                    Debug.WriteLine($"[Tab 已存在] puuid = {puuid}，切换到现有 Tab");
                     MainTabControl.SelectedTab = page;
 
-                    // 刷新已有 Tab 内容
                     if (_tabPageContents.TryGetValue(page, out var existingContent))
                     {
-                        string fullGameName = gameName + "#" + tagLine;
+                        string fullGameName = $"{gameName}#{tagLine}";
                         existingContent.InitiaRank(fullGameName, profileIconId, summonerLevel, privacy, rankedStats);
-                        //existingContent.Initialize(puuid);
-
                         Task.Run(async () =>
                         {
                             try
@@ -102,8 +108,14 @@ namespace League.uitls
                             }
                         });
                     }
-
                     return;
+                }
+
+                // 限制最大 Tab 数量（放在循环里，但建议移到外面更安全）
+                if (MainTabControl.TabPages.Count >= 8)
+                {
+                    var oldestTab = MainTabControl.TabPages[0];
+                    CloseTab(oldestTab);
                 }
             }
 
@@ -112,7 +124,6 @@ namespace League.uitls
             {
                 Tag = puuid
             };
-
 
             // 创建内容控件
             var tabContent = new MatchTabPageContent();

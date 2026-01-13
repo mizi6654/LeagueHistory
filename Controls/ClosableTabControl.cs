@@ -1,9 +1,13 @@
 ﻿using System.Drawing.Drawing2D;
+using static League.FormMain;
 
 namespace League.Controls
 {
     public class ClosableTabControl : TabControl
     {
+        // 新增字段：记录“不可关闭的Tab”
+        public TabPage? ProtectedTab { get; private set; }
+
         private const int CloseButtonSize = 12;
         private const int CloseButtonMargin = 5;
 
@@ -21,6 +25,44 @@ namespace League.Controls
 
             // 立即触发重绘
             Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+
+            for (int i = 0; i < TabCount; i++)
+            {
+                if (_closeButtonBounds.TryGetValue(i, out var rect) && rect.Contains(e.Location))
+                {
+                    var page = TabPages[i];
+                    string? pagePuuid = page.Tag as string;
+
+                    if (pagePuuid != null &&
+                        string.Equals(pagePuuid, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        MessageBox.Show("此选项卡为自己数据，不能关闭", "提示", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+                    }
+                    else
+                    {
+                        TabPages.Remove(page);
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 最后防线：不允许 Tab 完全清空（至少留一个）
+        protected override void OnControlRemoved(ControlEventArgs e)
+        {
+            base.OnControlRemoved(e);
+
+            if (TabCount == 0)
+            {
+                MessageBox.Show("必须至少保留自己的数据页", "提示", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+                // 如果你能拿到自己 Tab 的引用，可以在这里加回去：
+                // 但因为没有引用，这里只能提示，实际不加回
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -89,27 +131,6 @@ namespace League.Controls
                 using (Pen borderPen = new Pen(Color.Gray))
                 {
                     e.Graphics.DrawRectangle(borderPen, pageBounds.X - 2, pageBounds.Y - 2, pageBounds.Width + 3, pageBounds.Height + 3);
-                }
-            }
-        }
-
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            base.OnMouseDown(e);
-
-            for (int i = 0; i < TabCount; i++)
-            {
-                if (_closeButtonBounds.TryGetValue(i, out var rect) && rect.Contains(e.Location))
-                {
-                    if (i == 0)
-                    {
-                        MessageBox.Show("此选项卡为自己数据，不能关闭", "提示", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
-                    }
-                    else
-                    {
-                        TabPages.RemoveAt(i);
-                    }
-                    break;
                 }
             }
         }
