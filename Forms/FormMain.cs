@@ -286,6 +286,41 @@ namespace League
             );
         }
 
+        private async void Panel_PlayerIconClicked(string summonerId)
+        {
+            _uiManager!.ShowLoadingIndicator();
+            try
+            {
+                JObject? summoner = await Globals.lcuClient.GetGameNameBySummonerId(summonerId);
+                if (summoner != null)
+                {
+                    RefreshState.ForceMatchRefresh = true;
+                    var rankedStats = await GetRankedStatsAsync(summoner["puuid"]?.ToString() ?? "");
+                    string privacyStatus = GetPrivacyStatus(summoner);
+
+                    _matchTabContent?.CreateNewTab(
+                        summoner["summonerId"]?.ToString() ?? "",
+                        summoner["gameName"]?.ToString() ?? "",
+                        summoner["tagLine"]?.ToString() ?? "",
+                        summoner["puuid"]?.ToString() ?? "",
+                        summoner["profileIconId"]?.ToString() ?? "",
+                        summoner["summonerLevel"]?.ToString() ?? "",
+                        privacyStatus,
+                        rankedStats
+                    );
+                    txtGameName.Text = "";
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("查询失败: " + ex.Message);
+            }
+            finally
+            {
+                _uiManager!.HideLoadingIndicator();
+            }
+        }
+
         /// <summary>
         /// 查询数据（保留原有方法）
         /// </summary>
@@ -360,40 +395,6 @@ namespace League
             return panel;
         }
 
-        private async void Panel_PlayerIconClicked(string summonerId)
-        {
-            _uiManager!.ShowLoadingIndicator();
-            try
-            {
-                JObject? summoner = await Globals.lcuClient.GetGameNameBySummonerId(summonerId);
-                if (summoner != null)
-                {
-                    RefreshState.ForceMatchRefresh = true;
-                    var rankedStats = await GetRankedStatsAsync(summoner["puuid"]?.ToString() ?? "");
-                    string privacyStatus = GetPrivacyStatus(summoner);
-
-                    _matchTabContent?.CreateNewTab(
-                        summoner["summonerId"]?.ToString() ?? "",
-                        summoner["gameName"]?.ToString() ?? "",
-                        summoner["tagLine"]?.ToString() ?? "",
-                        summoner["puuid"]?.ToString() ?? "",
-                        summoner["profileIconId"]?.ToString() ?? "",
-                        summoner["summonerLevel"]?.ToString() ?? "",
-                        privacyStatus,
-                        rankedStats
-                    );
-                    txtGameName.Text = "";
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("查询失败: " + ex.Message);
-            }
-            finally
-            {
-                _uiManager!.HideLoadingIndicator();
-            }
-        }
         #endregion
 
         #region 辅助方法
