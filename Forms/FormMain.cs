@@ -15,8 +15,6 @@ using League.uitls;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Text;
 
 namespace League
 {
@@ -67,7 +65,7 @@ namespace League
             _playerCardManager = new PlayerCardManager(this, _matchQueryProcessor);
             _gameFlowWatcher = new GameFlowWatcher(this, _uiManager, _playerCardManager, _matchQueryProcessor);
             _messageSender = new MessageSender();
-            _configUpdateManager = new ConfigUpdateManager();
+            _configUpdateManager = new ConfigUpdateManager(this);
             _matchDetailManager = new MatchDetailManager(this);
         }
 
@@ -82,6 +80,9 @@ namespace League
         {
             try
             {
+                // 检查更新（不等待，避免阻塞UI）
+                _ = _configUpdateManager.CheckForUpdates();
+
                 // 加载图片
                 var img1 = Image.FromFile(AppDomain.CurrentDomain.BaseDirectory + @"\Assets\Defaults\01.png");
                 var img2 = Image.FromFile(AppDomain.CurrentDomain.BaseDirectory + @"\Assets\Defaults\02.png");
@@ -111,9 +112,6 @@ namespace League
                 chkRanked.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkAram.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkNexus.CheckedChanged += ModeCheckBox_CheckedChanged;
-
-                // 检查更新（不等待，避免阻塞UI）
-                _ = _configUpdateManager.CheckForUpdates();
 
                 // 启动轮询 LCU 检测
                 StartLcuConnectPolling();
