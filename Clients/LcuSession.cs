@@ -1,6 +1,9 @@
 ﻿using League.PrimaryElection;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
+using System.Net.WebSockets;
+using System.Text;
 
 namespace League.Clients
 {
@@ -19,6 +22,8 @@ namespace League.Clients
         private GameflowService _gameflowService;
         private ReplayService _replayService;
         private ChampionSelectService _championSelectService;
+        private ChatService _chatService;
+        public ChatService ChatService => _chatService;
 
         /// <summary>
         /// 获取HTTP客户端（保持向后兼容）
@@ -72,6 +77,7 @@ namespace League.Clients
             _rankedService = new RankedService(_lcuClient);
             _replayService = new ReplayService(_lcuClient);
             _championSelectService = new ChampionSelectService(_lcuClient, _gameflowService);
+            _chatService = new ChatService(_lcuClient);
         }
 
         /// <summary>
@@ -104,6 +110,340 @@ namespace League.Clients
                 return false;
             }
         }
+
+        #region 发送战绩 - 增强版
+        /// <summary>
+        /// 选人阶段发送（弱化），已成功发送
+        /// </summary>
+        public async Task<bool> SendChampSelectMessageAsync(string text)
+        {
+            Debug.WriteLine($"[SendChampSelect] 尝试发送: {text}");
+
+            var chatId = await _chatService.FindConversationIdAsync("championSelect");
+            if (!string.IsNullOrEmpty(chatId))
+            {
+                bool result = await _chatService.SendMessageAsync(chatId, text);
+                Debug.WriteLine($"[SendChampSelect] 结果: {(result ? "成功" : "失败")}");
+                return result;
+            }
+
+            Debug.WriteLine("[SendChampSelect] 未找到 championSelect 会话，发送失败");
+            return false;
+        }
+
+        
+        /// <summary>
+        /// Akari风格：直接使用游戏内聊天API（不依赖会话查找）
+        /// </summary>
+        public async Task<bool> SendGameChatDirectly(string message)
+        {
+            var payload = new
+            {
+                body = message,
+                conversationType = "game"
+            };
+
+            var resp = await _lcuClient.PostAsync(
+                "/lol-game-client-chat/v1/instant-messages",
+                new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json")
+            );
+
+            return resp.IsSuccessStatusCode;
+        }
+        #endregion
+
+        #region 游戏内聊天消息发送，尝试使用websocket
+        /// <summary>
+        /// 综合发送方法：尝试所有可能的方案
+        /// </summary>
+        public async Task<bool> SendMessageComprehensive(string text, string target = "all")
+        {
+            try
+            {
+                Debug.WriteLine($"[SendMessageComprehensive] 开始发送，长度={text.Length}");
+
+                // 1. 先尝试简单的API方法
+                Debug.WriteLine("[SendMessageComprehensive] 尝试方法1: 简单API");
+                var result1 = await SendInGameMessageSimple(text);
+                if (result1)
+                {
+                    Debug.WriteLine("[SendMessageComprehensive] 方法1成功");
+                    return true;
+                }
+
+                // 2. 尝试WebSocket方法
+                Debug.WriteLine("[SendMessageComprehensive] 尝试方法2: WebSocket");
+                var result2 = await SendViaWebSocket(text, target);
+                if (result2)
+                {
+                    Debug.WriteLine("[SendMessageComprehensive] 方法2成功");
+                    return true;
+                }
+
+                Debug.WriteLine("[SendMessageComprehensive] 所有方法都失败");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SendMessageComprehensive] 异常: {ex}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 简化版：直接尝试发送，不检查状态
+        /// </summary>
+        public async Task<bool> SendInGameMessageSimple(string text)
+        {
+            try
+            {
+                Debug.WriteLine($"[SendSimple] 尝试发送消息，长度={text.Length}");
+
+                // 尝试不同的参数组合
+                var payloads = new List<object>
+                {
+                    new { message = text, summonerName = "all" },
+                    new { body = text, summonerName = "all" },
+                    new { message = text, to = "all" },
+                    new { text = text, target = "all" }
+                };
+
+                foreach (var payload in payloads)
+                {
+                    try
+                    {
+                        var content = new StringContent(
+                            JsonConvert.SerializeObject(payload),
+                            Encoding.UTF8,
+                            "application/json"
+                        );
+
+                        var resp = await _lcuClient.PostAsync(
+                            "/lol-game-client-chat/v1/instant-messages",
+                            content
+                        );
+
+                        if (resp.IsSuccessStatusCode)
+                        {
+                            Debug.WriteLine($"[SendSimple] 发送成功，使用: {payload.GetType().Name}");
+                            return true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[SendSimple] 尝试异常: {ex.Message}");
+                    }
+
+                    await Task.Delay(50);
+                }
+
+                Debug.WriteLine("[SendSimple] 所有尝试都失败");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SendSimple] 异常: {ex}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 尝试通过WebSocket发送消息
+        /// </summary>
+        public async Task<bool> SendViaWebSocket(string text, string target = "all")
+        {
+            try
+            {
+                Debug.WriteLine($"[WebSocket] 准备发送消息，长度={text.Length}, target={target}");
+
+                // 获取WebSocket连接信息
+                var wsInfo = await GetWebSocketConnectionInfo();
+                if (wsInfo == null)
+                {
+                    Debug.WriteLine("[WebSocket] 无法获取连接信息");
+                    return false;
+                }
+
+                Debug.WriteLine($"[WebSocket] 连接信息: 端口={wsInfo.Port}, Token={wsInfo.Token}");
+
+                // 建立WebSocket连接
+                using (var ws = new ClientWebSocket())
+                {
+                    // 创建URI
+                    var uri = new Uri($"wss://127.0.0.1:{wsInfo.Port}/");
+
+                    // 设置选项
+                    ws.Options.RemoteCertificateValidationCallback =
+                        (sender, certificate, chain, sslPolicyErrors) => true;
+
+                    // 添加认证头
+                    string auth = Convert.ToBase64String(
+                        System.Text.Encoding.ASCII.GetBytes($"riot:{wsInfo.Token}")
+                    );
+                    ws.Options.SetRequestHeader("Authorization", $"Basic {auth}");
+
+                    Debug.WriteLine($"[WebSocket] 连接中: {uri}");
+
+                    // 连接到WebSocket服务器
+                    await ws.ConnectAsync(uri, CancellationToken.None);
+
+                    Debug.WriteLine("[WebSocket] 连接成功");
+
+                    // 构建消息
+                    var message = new
+                    {
+                        type = "chat",
+                        data = new
+                        {
+                            message = text,
+                            summonerName = target,
+                            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                        }
+                    };
+
+                    string json = JsonConvert.SerializeObject(message);
+                    Debug.WriteLine($"[WebSocket] 发送JSON: {json}");
+
+                    var buffer = System.Text.Encoding.UTF8.GetBytes(json);
+
+                    // 发送消息
+                    await ws.SendAsync(
+                        new ArraySegment<byte>(buffer),
+                        WebSocketMessageType.Text,
+                        true,
+                        CancellationToken.None
+                    );
+
+                    Debug.WriteLine("[WebSocket] 消息已发送");
+
+                    // 等待确认（可选）
+                    await Task.Delay(500);
+
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[WebSocket] 异常: {ex.GetType().Name} - {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Debug.WriteLine($"[WebSocket] 内部异常: {ex.InnerException.Message}");
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取WebSocket连接信息
+        /// </summary>
+        private async Task<WebSocketInfo> GetWebSocketConnectionInfo()
+        {
+            try
+            {
+                // 方法1：从当前LcuClient获取连接信息
+                if (_lcuClient != null)
+                {
+                    // 通常LcuClient会存储这些信息
+                    // 你需要查看LcuClient类的实现
+                }
+
+                // 方法2：通过HTTP API获取连接信息
+                var resp = await _lcuClient.GetAsync("/riotclient/command-line-args");
+                if (resp.IsSuccessStatusCode)
+                {
+                    var json = await resp.Content.ReadAsStringAsync();
+                    var args = JsonConvert.DeserializeObject<string[]>(json);
+
+                    string port = null;
+                    string token = null;
+
+                    foreach (var arg in args)
+                    {
+                        if (arg.StartsWith("--app-port="))
+                            port = arg.Substring(11);
+                        else if (arg.StartsWith("--remoting-auth-token="))
+                            token = arg.Substring(22);
+                    }
+
+                    if (!string.IsNullOrEmpty(port) && !string.IsNullOrEmpty(token))
+                    {
+                        return new WebSocketInfo
+                        {
+                            Port = port.Trim('"'),
+                            Token = token.Trim('"')
+                        };
+                    }
+                }
+
+                // 方法3：尝试直接读取进程命令行（备用方法）
+                var process = System.Diagnostics.Process.GetProcessesByName("LeagueClientUx").FirstOrDefault();
+                if (process != null)
+                {
+                    var cmdLine = GetCommandLine(process);
+                    var port = ExtractArgument(cmdLine, "--app-port=");
+                    var token = ExtractArgument(cmdLine, "--remoting-auth-token=");
+
+                    if (!string.IsNullOrEmpty(port) && !string.IsNullOrEmpty(token))
+                    {
+                        return new WebSocketInfo
+                        {
+                            Port = port.Trim('"'),
+                            Token = token.Trim('"')
+                        };
+                    }
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GetWebSocketConnectionInfo] 异常: {ex}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 获取进程命令行（从你的LcuConnector中提取）
+        /// </summary>
+        private string GetCommandLine(System.Diagnostics.Process process)
+        {
+            try
+            {
+                using var searcher = new System.Management.ManagementObjectSearcher(
+                    $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {process.Id}"
+                );
+                using var collection = searcher.Get();
+
+                foreach (System.Management.ManagementObject obj in collection)
+                {
+                    return obj["CommandLine"]?.ToString() ?? "";
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GetCommandLine] 失败: {ex.Message}");
+            }
+            return "";
+        }
+
+        /// <summary>
+        /// 提取命令行参数（从你的LcuConnector中提取）
+        /// </summary>
+        private string ExtractArgument(string cmdLine, string key)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(cmdLine, key + "([^ ]+)");
+            return match.Success ? match.Groups[1].Value : null;
+        }
+
+        /// <summary>
+        /// WebSocket连接信息
+        /// </summary>
+        private class WebSocketInfo
+        {
+            public string Port { get; set; }
+            public string Token { get; set; }
+        }
+        #endregion
 
         #region 向后兼容的方法包装器
 

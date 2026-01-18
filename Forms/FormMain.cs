@@ -15,6 +15,8 @@ using League.uitls;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace League
 {
@@ -46,11 +48,12 @@ namespace League
         // UI控件引用
         public Panel? _waitingPanel; // 添加这个字段
 
-        // 缓存字段
-        private readonly Dictionary<long, PlayerMatchInfo> _cachedPlayerMatchInfos = new Dictionary<long, PlayerMatchInfo>();
-
         // 读取预选英雄列表
         private List<PreliminaryHero>? _preSelectedHeroes = null;
+
+        // 战绩发送处理
+        private ChatMessageBuilder? _chatMessageBuilder;
+        private InGameChatSender? _inGameChatSender;
 
         public FormMain()
         {
@@ -67,6 +70,7 @@ namespace League
             _messageSender = new MessageSender();
             _configUpdateManager = new ConfigUpdateManager(this);
             _matchDetailManager = new MatchDetailManager(this);
+            _chatMessageBuilder = new ChatMessageBuilder(GetCachedPlayerInfos);
         }
 
         public void SaveAppConfig()
@@ -113,6 +117,9 @@ namespace League
                 chkAram.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkNexus.CheckedChanged += ModeCheckBox_CheckedChanged;
 
+                // 安装热键钩子
+                InstallKeyboardHook();
+
                 // 启动轮询 LCU 检测
                 StartLcuConnectPolling();
             }
@@ -141,6 +148,9 @@ namespace League
                         _lcuPoller.Stop();
 
                         await InitializeAfterLcuConnected();
+
+                        // LCU 连接成功之后再创建消息发送监听
+                        _inGameChatSender = new InGameChatSender(Globals.lcuClient);
                     }
                     else
                     {
@@ -199,6 +209,263 @@ namespace League
         }
         #endregion
 
+        #region 热键监听 - 低级键盘钩子版
+
+        // 低级键盘钩子相关字段
+        private IntPtr _hookId = IntPtr.Zero;
+        private LowLevelKeyboardProc? _proc;
+        private DateTime _lastHookTrigger = DateTime.MinValue;
+        private readonly TimeSpan _debounceInterval = TimeSpan.FromMilliseconds(800);
+
+        // 委托定义
+        private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        // Windows API 声明
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int vKey);
+
+        private const int WH_KEYBOARD_LL = 13;
+        private const int WM_KEYDOWN = 0x0100;
+
+        // 安装钩子（在 FormMain_Load 里调用）
+        private void InstallKeyboardHook()
+        {
+            _proc = HookCallback;
+            using var curModule = Process.GetCurrentProcess().MainModule!;
+            _hookId = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(curModule.ModuleName), 0);
+
+            if (_hookId == IntPtr.Zero)
+            {
+                int error = Marshal.GetLastWin32Error();
+                Debug.WriteLine($"[钩子] 安装低级键盘钩子失败，错误码: {error}");
+            }
+            else
+            {
+                Debug.WriteLine("[钩子] 低级键盘钩子安装成功");
+            }
+        }
+
+        // 卸载钩子（在 OnFormClosing 里调用）
+        private void UninstallKeyboardHook()
+        {
+            if (_hookId != IntPtr.Zero)
+            {
+                UnhookWindowsHookEx(_hookId);
+                _hookId = IntPtr.Zero;
+                Debug.WriteLine("[钩子] 低级键盘钩子已卸载");
+            }
+        }
+
+        // 低级键盘钩子回调（核心）
+        private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode < 0)
+            {
+                return CallNextHookEx(_hookId, nCode, wParam, lParam);
+            }
+
+            if (wParam == (IntPtr)WM_KEYDOWN)
+            {
+                int vkCode = Marshal.ReadInt32(lParam);
+                Keys key = (Keys)vkCode;
+
+                bool isCtrlDown = (GetAsyncKeyState((int)Keys.ControlKey) & 0x8000) != 0;
+
+                // 只处理我们关心的按键
+                bool isTargetKey = (key == Keys.F9 || key == Keys.F11 || key == Keys.F12 ||
+                                   (isCtrlDown && key == Keys.F7));
+
+                if (isTargetKey)
+                {
+                    DateTime now = DateTime.Now;
+                    if ((now - _lastHookTrigger) < _debounceInterval)
+                    {
+                        Debug.WriteLine($"[钩子防抖] 忽略 {key}，间隔太短");
+                        return (IntPtr)1; // 吞掉，避免重复
+                    }
+                    _lastHookTrigger = now;
+
+                    string keyDesc = key switch
+                    {
+                        Keys.F9 => "F9 (我方)",
+                        Keys.F11 => "F11 (我方-备用)",
+                        Keys.F12 => "F12 (全队)",
+                        Keys.F7 when isCtrlDown => "Ctrl+F7 (选人)",
+                        _ => key.ToString()
+                    };
+
+                    Debug.WriteLine($"[钩子触发] {keyDesc} at {now:HH:mm:ss.fff} (Ctrl={isCtrlDown})");
+
+                    // 异步处理，避免阻塞钩子回调
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            string phase = await GetGameflowPhaseSafe();
+
+                            if (phase == "InProgress")
+                            {
+                                if (key == Keys.F9 || key == Keys.F11)
+                                {
+                                    await HandleMyTeam();
+                                }
+                                else if (key == Keys.F12)
+                                {
+                                    await HandleFullTeam();
+                                }
+                            }
+                            else if (phase == "ChampSelect" && isCtrlDown && key == Keys.F7)
+                            {
+                                await HandleChampSelectF7();
+                            }
+                            else
+                            {
+                                Debug.WriteLine($"[钩子] 阶段不支持: {phase}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[钩子处理异常] {keyDesc} - {ex.Message}");
+                        }
+                    });
+
+                    // 推荐：吞掉按键，让游戏收不到 F9/F12（避免红色框/截图）
+                    return (IntPtr)1;
+                }
+            }
+
+            return CallNextHookEx(_hookId, nCode, wParam, lParam);
+        }
+        #endregion
+
+        #region 热键监听
+
+        // 🔥 新增：选人阶段发送（Ctrl+F7）
+        private async Task HandleChampSelectF7()
+        {
+            string phase = await GetGameflowPhaseSafe();
+            if (phase != "ChampSelect")
+            {
+                Debug.WriteLine($"[Ctrl+F7] 当前不是选人阶段: {phase}");
+                return;
+            }
+
+            var myTeam = _cachedMyTeam;
+            if (myTeam == null || myTeam.Count == 0)
+            {
+                Debug.WriteLine("[Ctrl+F7] 我方队伍缓存为空");
+                return;
+            }
+
+            string msg = _chatMessageBuilder!.BuildMyTeamSummary(myTeam);
+            if (string.IsNullOrWhiteSpace(msg))
+            {
+                Debug.WriteLine("[Ctrl+F7] 生成的消息为空");
+                return;
+            }
+
+            // 选人阶段发送（优先使用 LcuSession 里已有的方法）
+            bool success = await Globals.lcuClient.SendChampSelectMessageAsync(msg);
+
+            // 如果上面失败，再尝试用 InGameChatSender 的通用方式（兼容性更强）
+            if (!success)
+            {
+                Debug.WriteLine("[Ctrl+F7] 选人发送失败，不再 fallback");
+            }
+
+            Debug.WriteLine($"[Ctrl+F7] 选人阶段发送 {(success ? "成功" : "失败")}");
+        }
+
+        // 🔥 新增：我方队伍发送（F9/F11通用）
+        private async Task HandleMyTeam()
+        {
+            if (_inGameChatSender == null)
+            {
+                Debug.WriteLine("[HandleMyTeam] InGameChatSender 未初始化，跳过");
+                return;
+            }
+
+            string phase = await GetGameflowPhaseSafe();
+            if (phase != "InProgress")
+            {
+                Debug.WriteLine($"[F9] 非游戏阶段: {phase}");
+                return;
+            }
+
+            var myTeam = _cachedMyTeam;
+            if (myTeam == null || myTeam.Count == 0)
+            {
+                Debug.WriteLine("[F9] 我方队伍为空");
+                return;
+            }
+
+            string msg = _chatMessageBuilder!.BuildMyTeamSummary(myTeam);
+            if (string.IsNullOrWhiteSpace(msg)) return;
+
+            //bool success = await Globals.lcuClient.SendInGameMessageAsync(msg);
+            bool success = await Globals.lcuClient.SendMessageComprehensive(msg);
+            //bool success = GameChatInputSender.Send(msg);
+
+            Debug.WriteLine($"[F9] 发送结果: {(success ? "成功" : "失败")}");
+        }
+
+        // 🔥 新增：我方+敌方发送（F12）
+        private async Task HandleFullTeam()
+        {
+            if (_inGameChatSender == null)
+            {
+                Debug.WriteLine("[HandleFullTeam] InGameChatSender 未初始化，跳过");
+                return;
+            }
+
+            string phase = await GetGameflowPhaseSafe();
+            if (phase != "InProgress")
+            {
+                Debug.WriteLine($"[F12] 非游戏阶段: {phase}");
+                return;
+            }
+
+            var myTeam = _cachedMyTeam;
+            var enemyTeam = _cachedEnemyTeam;
+            if (myTeam?.Count > 0 == false || enemyTeam?.Count > 0 == false) return;
+
+            string msg = _chatMessageBuilder!.BuildFullTeamSummary(myTeam, enemyTeam);
+            if (string.IsNullOrWhiteSpace(msg)) return;
+
+            bool success = await Globals.lcuClient.SendMessageComprehensive(msg);
+            //bool success = GameChatInputSender.Send(msg);
+
+            Debug.WriteLine($"[F12] 发送结果: {(success ? "成功" : "失败")}");
+        }
+
+        // 🔥 安全获取游戏阶段（3秒超时）
+        private async Task<string> GetGameflowPhaseSafe()
+        {
+            try
+            {
+                return await Task.Run(async () => await Globals.lcuClient.GetGameflowPhase())
+                    .WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            catch
+            {
+                return "Unknown";
+            }
+        }
+        #endregion
+
         #region 战绩查询
         /// <summary>
         /// 默认查询当前客户端玩家对战数据
@@ -209,6 +476,8 @@ namespace League
             if (summoner == null) return;
 
             Globals.CurrentPuuid = summoner["puuid"]?.ToString() ?? "";
+            Globals.CurrentSummonerName = summoner["gameName"]?.ToString();
+
             var rankedStats = await GetRankedStatsAsync(summoner["puuid"]?.ToString() ?? "");
             string privacyStatus = GetPrivacyStatus(summoner);
 
@@ -414,7 +683,17 @@ namespace League
         // 为PlayerCardManager提供缓存访问
         public Dictionary<long, PlayerMatchInfo> GetCachedPlayerInfos()
         {
-            return _cachedPlayerMatchInfos;
+            // 直接返回 PlayerCardManager 的缓存（加 null 防护）
+            if (_playerCardManager == null)
+            {
+                Debug.WriteLine("[警告] _playerCardManager 为 null，无法获取缓存");
+                return new Dictionary<long, PlayerMatchInfo>();
+            }
+
+            lock (_playerCardManager._cachedPlayerMatchInfos)  // 注意加锁，防止并发问题
+            {
+                return new Dictionary<long, PlayerMatchInfo>(_playerCardManager._cachedPlayerMatchInfos);
+            }
         }
 
         // 为消息发送提供当前Puuid
@@ -542,6 +821,9 @@ namespace League
             _lcuPoller?.Stop();
             _tab1Poller?.Stop();
 
+            // 卸载热键钩子
+            UninstallKeyboardHook();
+
             base.OnFormClosing(e);
         }
         #endregion
@@ -555,6 +837,7 @@ namespace League
             public static string? CurrentSummonerId;
             public static string? CurrentPuuid;
             public static string? CurrGameMod;
+            public static string? CurrentSummonerName; // 纯 displayName（不带 #）
 
             // 新增这行：全局保存 WebSocket 客户端
             //public static LcuWebSocketClient? WsClient;
