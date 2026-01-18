@@ -1,18 +1,19 @@
-﻿using League.Extensions;
+﻿using League.Clients;
+using League.Extensions;
 using League.Managers;
+using League.Networking;
 using League.Parsers;
+using League.PrimaryElection;
 using League.States;
 using League.UIState;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
-using System.IO;
 using static League.FormMain;
 
 namespace League.Services
 {
     /// <summary>
     /// 负责监听游戏流程阶段（Gameflow Phase），并在不同阶段执行对应操作
-    /// 主要功能：选人阶段显示队伍卡片、自动预选/抢英雄、游戏结束清理等
     /// </summary>
     public class GameFlowWatcher
     {
@@ -21,16 +22,20 @@ namespace League.Services
         private readonly PlayerCardManager _cardManager;
         private readonly MatchQueryProcessor _matchQueryProcessor;
 
-        // 取消令牌：用于控制后台轮询任务
-        private CancellationTokenSource? _watcherCts;     // 全局游戏流程监听
-        private CancellationTokenSource? _champSelectCts; // 选人阶段专用轮询
+        // 取消令牌
+        private CancellationTokenSource? _watcherCts;
+        private CancellationTokenSource? _champSelectCts;
 
         // 状态标志
-        private bool _gameEndHandled = false; // 防止重复处理游戏结束
-        private bool _hasAutoPreliminated = false; // 只保留这个标志，用于普通模式的预选（ARAM 不需要停止）
-        private bool _hasSwappedInAram = false; // 恢复：ARAM 已抢过英雄标志（每局重置，一抢就停）
+        private bool _gameEndHandled = false;
+        private bool _hasAutoPreliminated = false;
+        private bool _hasSwappedInAram = false;
 
-        public GameFlowWatcher(FormMain form, FormUiStateManager uiManager, PlayerCardManager cardManager, MatchQueryProcessor matchQueryProcessor)
+        // 优化游戏模式设置（避免重复输出）
+        private string _lastQueueId = "";
+
+        public GameFlowWatcher(FormMain form, FormUiStateManager uiManager,
+            PlayerCardManager cardManager, MatchQueryProcessor matchQueryProcessor)
         {
             _form = form;
             _uiManager = uiManager;
@@ -38,10 +43,10 @@ namespace League.Services
             _matchQueryProcessor = matchQueryProcessor;
         }
 
-        #region 1. 全局游戏流程监听（Lobby → Matchmaking → ChampSelect → InProgress → End）
+        #region 1. 全局游戏流程监听
 
         /// <summary>
-        /// 启动后台轮询，监听游戏阶段变化（每秒检查一次）
+        /// 启动游戏流程监听
         /// </summary>
         public async void StartGameflowWatcher()
         {
@@ -65,7 +70,7 @@ namespace League.Services
                             if (string.IsNullOrEmpty(phase))
                             {
                                 OnLcuDisconnected();
-                                return; // 退出任务
+                                return;
                             }
 
                             if (phase != lastPhase)
@@ -74,37 +79,26 @@ namespace League.Services
                                 lastPhase = phase;
                             }
 
-                            await Task.Delay(1000, token); // 正常延迟
+                            await Task.Delay(1000, token);
                         }
-                        catch (TaskCanceledException)
-                        {
-                            // 正常取消：窗体关闭或手动停止，静默退出
-                            return;
-                        }
+                        catch (TaskCanceledException) { return; }
                         catch (Exception ex)
                         {
-                            // 真正的网络或其他异常，才记录日志
-                            Debug.WriteLine($"[GameflowWatcher] 轮询内部异常：{ex}");
-                            // 可选：短暂等待后继续，避免异常轰炸
+                            Debug.WriteLine($"[GameflowWatcher] 轮询异常：{ex}");
                             await Task.Delay(2000, token);
                         }
                     }
                 }, token);
             }
-            catch (TaskCanceledException)
-            {
-                // 外部也可能收到取消（极少情况），静默忽略
-                // 不打印任何日志
-            }
+            catch (TaskCanceledException) { }
             catch (Exception ex)
             {
-                // 只有非取消的严重异常才记录
                 Debug.WriteLine($"[GameflowWatcher] 严重异常：{ex}");
             }
         }
 
         /// <summary>
-        /// 停止所有后台轮询任务
+        /// 停止所有轮询任务
         /// </summary>
         public void StopGameflowWatcher()
         {
@@ -118,70 +112,25 @@ namespace League.Services
         }
 
         /// <summary>
-        /// 根据游戏阶段执行对应逻辑
+        /// 处理游戏阶段变化
         /// </summary>
         public async Task HandleGameflowPhase(string phase, string? previousPhase)
         {
+            Debug.WriteLine($"[游戏阶段] {previousPhase} → {phase}");
+
             switch (phase)
             {
                 case "Matchmaking":
                 case "ReadyCheck":
-                    _uiManager.IsGame = false;
-
-                    // ===== 新增：开局时立刻清空所有战绩缓存（包括你自己）=====
-                    _cardManager.ClearAllCaches();
-                    _cardManager.ClearGameState();
-                    _matchQueryProcessor.ClearPlayerMatchCache(); 
-                    // =========================================================
-
-                    _cardManager.ClearGameState();
-                    FormUiStateManager.SafeInvoke(_form.imageTabControl1, () =>
-                    {
-                        _uiManager.SetLcuUiState(_uiManager.LcuReady, _uiManager.IsGame);
-                        _form.imageTabControl1.SelectedIndex = 1;
-                    });
+                    await HandleMatchmakingPhase();
                     break;
-                // 在 HandleGameflowPhase 中：只负责“秒隐 + 强制重绘”，然后立即启动选人逻辑
+
                 case "ChampSelect":
-                    _uiManager.IsGame = true;
-
-                    // 【一步到位，强制隐藏 + 立即重绘，杜绝残影】
-                    FormUiStateManager.SafeInvoke(_form, () =>
-                    {
-                        // 移除等待面板
-                        if (_form._waitingPanel != null)
-                        {
-                            if (_form.penalGameMatchData.Controls.Contains(_form._waitingPanel))
-                            {
-                                _form.penalGameMatchData.Controls.Remove(_form._waitingPanel);
-                            }
-                            _form._waitingPanel.Dispose();
-                            _form._waitingPanel = null;
-                        }
-
-                        // 准备对战面板（清空 + 显示）
-                        _form.tableLayoutPanel1.Controls.Clear();
-                        _form.tableLayoutPanel1.Visible = true;
-                        _form.tableLayoutPanel1.Dock = DockStyle.Fill;
-                        if (!_form.penalGameMatchData.Controls.Contains(_form.tableLayoutPanel1))
-                        {
-                            _form.penalGameMatchData.Controls.Add(_form.tableLayoutPanel1);
-                        }
-
-                        // 【关键：强制立即重绘，清除残影】
-                        _form.penalGameMatchData.SuspendLayout();
-                        _form.penalGameMatchData.Refresh();  // 最强组合：Invalidate + Update
-                        _form.penalGameMatchData.ResumeLayout(true);
-                    });
-
-                    // 立即启动选人阶段详细逻辑（不等待）
-                    _ = OnChampSelectStart();
-
+                    await HandleChampSelectPhase();
                     break;
 
                 case "InProgress":
-                    _champSelectCts?.Cancel();
-                    await ShowEnemyTeamCards(); // 显示敌方战绩卡片
+                    await HandleInProgressPhase();
                     break;
 
                 case "EndOfGame":
@@ -189,25 +138,109 @@ namespace League.Services
                 case "WaitingForStats":
                 case "Lobby":
                 case "None":
-
-                    // ===== 新增：游戏结束或回到大厅时也清空缓存（双保险）=====
-                    _cardManager.ClearAllCaches();
-                    _cardManager.ClearGameState();
-                    _matchQueryProcessor.ClearPlayerMatchCache();
-                    // =====================================================
-
                     await HandleGameEndPhase(previousPhase);
                     break;
             }
         }
 
+        #endregion
+
+        #region 2. 各阶段具体处理
+
         /// <summary>
-        /// 游戏结束后的统一清理（只执行一次）
+        /// 匹配阶段处理
+        /// </summary>
+        private async Task HandleMatchmakingPhase()
+        {
+            _uiManager.IsGame = false;
+
+            // 清空缓存，准备新游戏
+            _cardManager.ClearAllCaches();
+            _cardManager.ClearGameState();
+            _matchQueryProcessor.ClearPlayerMatchCache();
+
+            // 切换到第二个Tab页并更新UI状态
+            FormUiStateManager.SafeInvoke(_form.imageTabControl1, () =>
+            {
+                // 1. 先切换到第二个Tab
+                _form.imageTabControl1.SelectedIndex = 1;
+
+                // 2. 更新UI状态（显示"正在等待加入游戏"）
+                _uiManager.SetLcuUiState(_uiManager.LcuReady, _uiManager.IsGame);
+            });
+        }
+
+        /// <summary>
+        /// 选人阶段处理（核心）
+        /// </summary>
+        private async Task HandleChampSelectPhase()
+        {
+            _uiManager.IsGame = true;
+
+            // 【一步到位，强制隐藏 + 立即重绘，杜绝残影】
+            FormUiStateManager.SafeInvoke(_form, () =>
+            {
+                // 移除等待面板
+                if (_form._waitingPanel != null)
+                {
+                    if (_form.penalGameMatchData.Controls.Contains(_form._waitingPanel))
+                    {
+                        _form.penalGameMatchData.Controls.Remove(_form._waitingPanel);
+                    }
+                    _form._waitingPanel.Dispose();
+                    _form._waitingPanel = null;
+                }
+
+                // 准备对战面板（清空 + 显示）
+                _form.tableLayoutPanel1.Controls.Clear();
+                _form.tableLayoutPanel1.Visible = true;
+                _form.tableLayoutPanel1.Dock = DockStyle.Fill;
+                if (!_form.penalGameMatchData.Controls.Contains(_form.tableLayoutPanel1))
+                {
+                    _form.penalGameMatchData.Controls.Add(_form.tableLayoutPanel1);
+                }
+
+                // 【关键：强制立即重绘，清除残影】
+                _form.penalGameMatchData.SuspendLayout();
+                _form.penalGameMatchData.Refresh();
+                _form.penalGameMatchData.ResumeLayout(true);
+            });
+
+            // 立即启动选人阶段详细逻辑（不等待）
+            _ = StartChampSelectProcessing();
+        }
+
+        /// <summary>
+        /// 游戏进行阶段处理 - 修复：添加 try-catch 防止异常传播
+        /// </summary>
+        private async Task HandleInProgressPhase()
+        {
+            try
+            {
+                // 安全地取消选人阶段轮询
+                if (_champSelectCts != null)
+                {
+                    try
+                    {
+                        _champSelectCts.Cancel();
+                    }
+                    catch { } // 忽略取消异常
+                }
+
+                await ShowEnemyTeamCards();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HandleInProgressPhase] 异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 游戏结束阶段处理
         /// </summary>
         private async Task HandleGameEndPhase(string? previousPhase)
         {
-            if (!_gameEndHandled &&
-                (previousPhase == "InProgress" || previousPhase == "WaitingForStats" || previousPhase == "ChampSelect"))
+            if (!_gameEndHandled && IsValidPreviousPhase(previousPhase))
             {
                 _gameEndHandled = true;
                 await OnGameEnd();
@@ -216,54 +249,345 @@ namespace League.Services
 
         #endregion
 
-        #region 2. 自动预选 / 抢英雄核心逻辑
+        #region 3. 选人阶段核心逻辑 - 修复取消逻辑
+
         /// <summary>
-        /// 自动预选功能核心方法，根据勾选的模式进行过滤
+        /// 启动选人阶段处理 - 修复：改进取消逻辑
+        /// </summary>
+        private async Task StartChampSelectProcessing()
+        {
+            // 重置本局状态
+            ResetGameState();
+
+            // 取消现有的选人轮询
+            if (_champSelectCts != null)
+            {
+                try
+                {
+                    _champSelectCts.Cancel();
+                    _champSelectCts.Dispose();
+                }
+                catch { } // 忽略异常
+            }
+
+            _champSelectCts = new CancellationTokenSource();
+            var token = _champSelectCts.Token;
+
+            try
+            {
+                // 先短暂等待，确保UI清理完成
+                await Task.Delay(300, token);
+
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var currentPhase = await Globals.lcuClient.GetGameflowPhase();
+                        if (currentPhase != "ChampSelect") break;
+
+                        // 更新我方队伍卡片
+                        await UpdateMyTeamCards();
+
+                        // 尝试自动预选
+                        await TryAutoPreliminaryAsync();
+
+                        // 根据模式设置轮询间隔
+                        await Task.Delay(GetPollingDelay(), token);
+                    }
+                    catch (TaskCanceledException)
+                    {
+                        Debug.WriteLine("[选人轮询] 任务被取消");
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[选人轮询] 异常: {ex.Message}");
+                        await Task.Delay(1000, token);
+                    }
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                Debug.WriteLine("[StartChampSelectProcessing] 任务被取消");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[StartChampSelectProcessing] 异常: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region 4. 队伍卡片显示
+
+        /// <summary>
+        /// 更新我方队伍卡片 - 修复：添加 session 获取失败处理
+        /// </summary>
+        private async Task UpdateMyTeamCards()
+        {
+            try
+            {
+                var session = await Globals.lcuClient.GetChampSelectSession();
+                if (session == null)
+                {
+                    Debug.WriteLine("[UpdateMyTeamCards] 无法获取选人会话");
+                    return;
+                }
+
+                // ⚠️ 优化：只在队列ID变化时设置
+                var queueId = session["queueId"]?.ToString() ?? "";
+                if (queueId != _lastQueueId && !string.IsNullOrEmpty(queueId))
+                {
+                    Globals.CurrGameMod = queueId;
+                    _lastQueueId = queueId;
+                    Debug.WriteLine($"[游戏模式] 设置为: {queueId}");
+                }
+
+                var myTeam = session["myTeam"] as JArray;
+                if (myTeam == null || myTeam.Count == 0)
+                {
+                    Debug.WriteLine("[UpdateMyTeamCards] 我方队伍数据为空");
+                    return;
+                }
+
+                // 检查是否有变化
+                var currentSnapshot = myTeam.Select(p =>
+                    $"{p["summonerId"]?.Value<long>() ?? 0}:{p["championId"]?.Value<int>() ?? 0}").ToList();
+
+                // 如果是第一次显示或队伍有变化
+                if (_form.lastChampSelectSnapshot.Count == 0 || !_form.lastChampSelectSnapshot.SequenceEqual(currentSnapshot))
+                {
+                    await ProcessMyTeam(myTeam, currentSnapshot);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[UpdateMyTeamCards] 异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 处理我方队伍数据
+        /// </summary>
+        private async Task ProcessMyTeam(JArray myTeam, List<string> currentSnapshot)
+        {
+            // 保存到缓存
+            _form._cachedMyTeam = myTeam;
+            _form.lastChampSelectSnapshot = currentSnapshot;
+
+            // 确定行号
+            int row = myTeam[0]?["team"]?.Value<int>() == 1 ? 0 : 1;
+
+            // 先创建基础卡片（立即显示英雄头像）
+            await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
+
+            // 然后异步填充详细数据
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _cardManager.FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[填充我方数据] 异常: {ex.Message}");
+                }
+            });
+        }
+
+        /// <summary>
+        /// 显示敌方队伍卡片 - 修复：设置游戏模式
+        /// </summary>
+        private async Task ShowEnemyTeamCards()
+        {
+            try
+            {
+                //Debug.WriteLine("[显示敌方队伍] 开始获取敌方数据");
+
+                // 获取当前玩家信息
+                var currentSummoner = await Globals.lcuClient.GetCurrentSummoner();
+                if (currentSummoner == null)
+                {
+                    Debug.WriteLine("[显示敌方队伍] 无法获取当前玩家");
+                    return;
+                }
+
+                string myPuuid = currentSummoner["puuid"]?.ToString();
+                if (string.IsNullOrEmpty(myPuuid))
+                {
+                    Debug.WriteLine("[显示敌方队伍] 当前玩家puuid为空");
+                    return;
+                }
+
+                // 获取游戏会话数据
+                var sessionData = await Globals.lcuClient.GetGameSession();
+                if (sessionData == null)
+                {
+                    Debug.WriteLine("[显示敌方队伍] 无法获取游戏会话");
+                    return;
+                }
+
+                // 保存完整session用于补全
+                var fullSession = ExtractFullSession(sessionData);
+
+                var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
+                var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
+                if (teamOne == null || teamTwo == null)
+                {
+                    Debug.WriteLine("[显示敌方队伍] 队伍数据不完整");
+                    return;
+                }
+
+                // 判断自己在哪一队
+                bool isInTeamOne = teamOne.Any(t =>
+                {
+                    var puuidToken = t["puuid"];
+                    return puuidToken != null && puuidToken.ToString() == myPuuid;
+                });
+
+                // 选择敌方队伍和行号
+                JArray enemyTeam = isInTeamOne ? teamTwo : teamOne;
+                int enemyRow = isInTeamOne ? 1 : 0;
+
+                if (enemyTeam == null || enemyTeam.Count == 0)
+                {
+                    Debug.WriteLine("[显示敌方队伍] 敌方队伍数据为空");
+                    return;
+                }
+
+                //Debug.WriteLine($"[显示敌方队伍] 找到敌方 {enemyTeam.Count} 人，显示在行 {enemyRow}");
+
+                // 先创建基础卡片
+                await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
+
+                // 然后异步填充详细数据
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[填充敌方数据] 异常: {ex.Message}");
+                    }
+                });
+
+                // 在显示敌方队伍后，检查并补全缺失卡片
+                await Task.Delay(1000); // 等待一下，确保基础卡片已创建
+
+                if (_cardManager != null)
+                {
+                    await _cardManager.CheckAndCompleteMissingCards(fullSession);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ShowEnemyTeamCards] 异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 提取完整的玩家session数据
+        /// </summary>
+        private JArray ExtractFullSession(JObject sessionData)
+        {
+            var fullPlayers = new JArray();
+
+            try
+            {
+                var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
+                var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
+
+                if (teamOne != null)
+                {
+                    foreach (var player in teamOne)
+                    {
+                        player["team"] = 1; // 标记队伍
+                        fullPlayers.Add(player);
+                    }
+                }
+
+                if (teamTwo != null)
+                {
+                    foreach (var player in teamTwo)
+                    {
+                        player["team"] = 2; // 标记队伍
+                        fullPlayers.Add(player);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[提取完整session] 异常: {ex.Message}");
+            }
+
+            Debug.WriteLine($"[提取完整session] 共找到 {fullPlayers.Count} 名玩家");
+            return fullPlayers;
+        }
+        #endregion
+
+        #region 5. 自动预选功能
+
+        /// <summary>
+        /// 尝试自动预选
         /// </summary>
         private async Task TryAutoPreliminaryAsync()
         {
-            // 先检查全局是否启用自动预选
-            var preConfig = _form.GetAppConfig()?.Preliminary;
-            if (preConfig == null || !preConfig.EnableAutoPreliminary)
-                return;
-
-            var preList = await _form.GetPreSelectedHeroesAsync();
-            if (!preList.Any())
-                return;
-
-            var session = await Globals.lcuClient.GetChampSelectSession();
-            if (session == null)
-                return;
-
-            int queueId = session["queueId"]?.Value<int>() ?? 0;
-
-            // ==================== 新增：根据 queueId 和用户配置决定是否执行 ====================
-            bool shouldExecute = queueId switch
+            try
             {
-                // 匹配模式：盲选(430)、征召(400)等
-                400 or 430 => _form.GetAppConfig().EnablePreliminaryInNormal,
+                // 检查是否启用自动预选
+                var preConfig = _form.GetAppConfig()?.Preliminary;
+                if (preConfig == null || !preConfig.EnableAutoPreliminary)
+                    return;
 
-                // 排位模式：单双排(420)、灵活选排(440)
-                420 or 440 => _form.GetAppConfig().EnablePreliminaryInRanked,
+                // 获取预选列表
+                var preList = await _form.GetPreSelectedHeroesAsync();
+                if (!preList.Any()) return;
 
-                // 大乱斗
-                450 => _form.GetAppConfig().EnablePreliminaryInAram,
+                // 获取当前会话
+                var session = await Globals.lcuClient.GetChampSelectSession();
+                if (session == null) return;
 
-                // 海克斯大乱斗（Nexus Blitz / Hexakill ARAM）
-                2400 => _form.GetAppConfig().EnablePreliminaryInNexusBlitz,
+                int queueId = session["queueId"]?.Value<int>() ?? 0;
 
-                _ => false // 其他模式一律不执行
-            };
+                // 检查是否在当前模式启用
+                if (!IsModeEnabled(queueId)) return;
 
-            if (!shouldExecute)
-            {
-                Debug.WriteLine($"[自动预选] 当前模式 queueId={queueId} 未勾选，跳过自动预选");
-                return;
+                // 执行预选逻辑
+                await ExecutePreliminaryLogic(queueId, preList);
             }
-            // ===============================================================================
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[TryAutoPreliminaryAsync] 异常: {ex.Message}");
+            }
+        }
 
-            // 原有逻辑保持不变
-            if (queueId == 450 || queueId == 2400) // ARAM 类模式：一直抢最高优先级
+        /// <summary>
+        /// 检查当前模式是否启用
+        /// </summary>
+        private bool IsModeEnabled(int queueId)
+        {
+            var config = _form.GetAppConfig();
+            if (config == null) return false;
+
+            return queueId switch
+            {
+                400 or 430 => config.EnablePreliminaryInNormal,
+                420 or 440 => config.EnablePreliminaryInRanked,
+                450 => config.EnablePreliminaryInAram,
+                2400 => config.EnablePreliminaryInNexusBlitz,
+                _ => false
+            };
+        }
+
+        /// <summary>
+        /// 执行预选逻辑
+        /// </summary>
+        private async Task ExecutePreliminaryLogic(int queueId, List<PreliminaryHero> preList)
+        {
+            // ARAM类模式：持续抢英雄
+            if (queueId == 450 || queueId == 2400)
             {
                 await Globals.lcuClient.AutoSwapToHighestPriorityAsync(preList);
                 return;
@@ -279,170 +603,88 @@ namespace League.Services
                 Debug.WriteLine("[自动预选] 普通模式意图声明成功");
             }
         }
+
         #endregion
 
-        #region 3. 选人阶段核心轮询（ChampSelect）
-        /// <summary>
-        /// 进入选人阶段时启动：高频轮询处理队伍显示 + 自动抢英雄
-        /// </summary>
-        private async Task OnChampSelectStart()
-        {
-            _champSelectCts?.Cancel();
-            _champSelectCts = new CancellationTokenSource();
-            var token = _champSelectCts.Token;
-            Debug.WriteLine("进入选人阶段，已由 HandleGameflowPhase 完成界面切换");
-
-            // 重置本局状态
-            _gameEndHandled = false;
-            _hasAutoPreliminated = false;
-            _hasSwappedInAram = false; // 每局重置 ARAM 标志
-
-            // 选人阶段轮询循环
-            await Task.Run(async () =>
-            {
-                await Task.Delay(800, token);  // 先等 800ms，让隐藏和重绘彻底完成
-
-                while (!token.IsCancellationRequested)
-                {
-                    try
-                    {
-                        var currentPhase = await Globals.lcuClient.GetGameflowPhase();
-                        if (currentPhase != "ChampSelect") break;
-                        await ShowMyTeamCards(); // 更新我方卡片 + 战绩
-                        await TryAutoPreliminaryAsync(); // 自动预选或抢英雄
-
-                        // 推荐：恢复高频轮询（随机模式下更快抢英雄）
-                        var session = await Globals.lcuClient.GetChampSelectSession();
-                        int queueId = session?["queueId"]?.Value<int>() ?? 0;
-                        int delay = queueId switch
-                        {
-                            450 => 500,
-                            2400 => 500,    // 2400的延迟设为500ms，你可以根据需要调整
-                            _ => 1000       // 默认值
-                        };
-                        await Task.Delay(delay, token);
-                    }
-                    catch (TaskCanceledException) { break; }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine("选人阶段轮询异常: " + ex.Message);
-                    }
-                }
-            }, token);
-        }
-        #endregion
-
-        #region 4. 队伍卡片显示
-        /// <summary>
-        /// 显示我方队伍卡片与战绩（选人阶段每轮更新）
-        /// </summary>
-        private async Task ShowMyTeamCards()
-        {
-            var session = await Globals.lcuClient.GetChampSelectSession();
-            if (session == null) return;
-
-            Globals.CurrGameMod = session["queueId"]?.ToString() ?? "";
-            int queueId = int.TryParse(Globals.CurrGameMod, out int qid) ? qid : 0;
-
-            var myTeam = session["myTeam"] as JArray;
-            if (myTeam == null || myTeam.Count == 0) return;
-
-            // 调试：查看队伍英雄选择状态
-            //Debug.WriteLine("[session Debug] myTeam summonerId 状态:");
-            foreach (var p in myTeam)
-            {
-                long sid = p["summonerId"]?.Value<long>() ?? 0;
-                int champId = p["championId"]?.Value<int>() ?? 0;
-                //Debug.WriteLine($" - Player: sid={sid}, championId={champId}");
-            }
-
-            // 队伍快照对比，避免重复刷新UI
-            var currentSnapshot = myTeam.Select(p =>
-                $"{p["summonerId"]?.Value<long>() ?? 0}:{p["championId"]?.Value<int>() ?? 0}").ToList();
-
-            if (_form.lastChampSelectSnapshot.SequenceEqual(currentSnapshot))
-                return;
-
-            _form.lastChampSelectSnapshot = currentSnapshot;
-            _form._cachedMyTeam = myTeam;
-
-            int row = myTeam[0]?["team"]?.Value<int>() == 1 ? 0 : 1;
-
-            await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
-            await _cardManager.FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
-        }
+        #region 6. 游戏结束与清理
 
         /// <summary>
-        /// 游戏开始后（InProgress阶段）显示敌方队伍卡片与战绩
-        /// </summary>
-        private async Task ShowEnemyTeamCards()
-        {
-            try
-            {
-                // 获取当前玩家 puuid
-                var currentSummoner = await Globals.lcuClient.GetCurrentSummoner();
-                if (currentSummoner == null || currentSummoner["puuid"]?.ToString() is not string myPuuid)
-                {
-                    return;
-                }
-
-                // 获取游戏会话数据（包含两队完整信息）
-                var sessionData = await Globals.lcuClient.GetGameSession();
-                if (sessionData == null) return;
-
-                var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
-                var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
-                if (teamOne == null || teamTwo == null) return;
-
-                // 判断自己在哪一队，避免重复查询
-                bool isInTeamOne = teamOne.Any(t =>
-                {
-                    var puuidToken = t["puuid"];
-                    return puuidToken != null && puuidToken.ToString() == myPuuid;
-                });
-
-                // 选择敌方队伍和对应行号
-                JArray enemyTeam = isInTeamOne ? teamTwo : teamOne;
-                int enemyRow = isInTeamOne ? 1 : 0;
-
-                // 缓存并显示敌方卡片
-                _form._cachedEnemyTeam = enemyTeam;
-                await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
-                await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("[ShowEnemyTeamCards] 异常: " + ex.ToString());
-            }
-        }
-        #endregion
-
-        #region 5. 游戏结束与清理
-
-        /// <summary>
-        /// 游戏结束后清理缓存并重置UI
+        /// 游戏结束处理
         /// </summary>
         private async Task OnGameEnd()
         {
-            Debug.WriteLine("游戏已结束，正在清空缓存及队伍存储信息，重置UI");
+            Debug.WriteLine("游戏已结束，正在清理...");
 
+            // 清理所有缓存
             _cardManager.ClearAllCaches();
-            _champSelectCts?.Cancel();
+
+            // 安全地取消选人轮询
+            if (_champSelectCts != null)
+            {
+                try
+                {
+                    _champSelectCts.Cancel();
+                    _champSelectCts.Dispose();
+                }
+                catch { } // 忽略异常
+            }
+
             _form.lastChampSelectSnapshot.Clear();
             RefreshState.ForceMatchRefresh = true;
+            _lastQueueId = ""; // 重置队列ID
 
-            _form.InvokeIfRequired(async () =>
+            // 重置UI
+            await Task.Run(() => _form.Invoke(async () =>
             {
                 await _form.InitializeDefaultTab();
-            });
+            }));
         }
 
         #endregion
 
-        #region 6. 辅助方法
+        #region 7. 辅助方法
 
         /// <summary>
-        /// LCU 断开连接时的处理
+        /// 重置游戏状态
+        /// </summary>
+        private void ResetGameState()
+        {
+            _gameEndHandled = false;
+            _hasAutoPreliminated = false;
+            _hasSwappedInAram = false;
+        }
+
+        /// <summary>
+        /// 获取轮询延迟时间
+        /// </summary>
+        private int GetPollingDelay()
+        {
+            try
+            {
+                // ARAM类模式需要更快的轮询
+                var session = Globals.lcuClient.GetChampSelectSession().Result;
+                int queueId = session?["queueId"]?.Value<int>() ?? 0;
+
+                return queueId == 450 || queueId == 2400 ? 500 : 1000;
+            }
+            catch
+            {
+                return 1000; // 默认值
+            }
+        }
+
+        /// <summary>
+        /// 检查是否为有效的上一阶段
+        /// </summary>
+        private bool IsValidPreviousPhase(string? previousPhase)
+        {
+            return previousPhase == "InProgress" ||
+                   previousPhase == "WaitingForStats" ||
+                   previousPhase == "ChampSelect";
+        }
+
+        /// <summary>
+        /// LCU断开连接处理
         /// </summary>
         private void OnLcuDisconnected()
         {
@@ -452,16 +694,6 @@ namespace League.Services
             _uiManager.SetLcuUiState(false, false);
             _form.StartLcuConnectPolling();
         }
-
-        /// <summary>
-        /// 外部调用：清理游戏相关状态（用于模式切换等）
-        /// </summary>
-        public void ClearGameState()
-        {
-            _form.lastChampSelectSnapshot.Clear();
-            _cardManager.ClearGameState();
-        }
-
         #endregion
     }
 }
