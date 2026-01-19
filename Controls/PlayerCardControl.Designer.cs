@@ -140,8 +140,6 @@
         }
 
         #endregion
-
-        private PictureBox picHero;
         private Label lblSoloRank;
         private Label lblFlexRank;
         private ListView listViewGames;
@@ -151,5 +149,6 @@
         private ColumnHeader columnHeader4;
         private Label lblPrivacyStatus;
         public LinkLabel lblPlayerName;
+        public PictureBox picHero;
     }
 }

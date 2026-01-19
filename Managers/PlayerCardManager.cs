@@ -35,6 +35,10 @@ namespace League.Managers
         // 新增：完整队伍数据缓存
         private JArray _fullSessionData = null;
 
+        // 添加 Image 缓存
+        private readonly Dictionary<int, Image> _championAvatarCache = new();
+        private Image _defaultAvatar = null;
+
         public PlayerCardManager(FormMain form, MatchQueryProcessor matchQueryProcessor)
         {
             _form = form;
@@ -1338,15 +1342,27 @@ namespace League.Managers
         /// </summary>
         private Image LoadChampionAvatar(int championId)
         {
+            if (championId <= 0) return LoadDefaultAvatar();
+
+            if (_championAvatarCache.TryGetValue(championId, out var cachedImage))
+            {
+                return cachedImage;
+            }
+
             try
             {
-                return Globals.resLoading.GetChampionIconAsync(championId).GetAwaiter().GetResult()
-                    ?? LoadDefaultAvatar();
+                var image = Globals.resLoading.GetChampionIconAsync(championId).GetAwaiter().GetResult();
+                if (image != null)
+                {
+                    // 确保创建副本，因为Image不能跨线程共享
+                    var clonedImage = new Bitmap(image);
+                    _championAvatarCache[championId] = clonedImage;
+                    return clonedImage;
+                }
             }
-            catch
-            {
-                return LoadDefaultAvatar();
-            }
+            catch { }
+
+            return LoadDefaultAvatar();
         }
 
         /// <summary>
@@ -1354,8 +1370,35 @@ namespace League.Managers
         /// </summary>
         private Image LoadDefaultAvatar()
         {
+            if (_defaultAvatar != null) return _defaultAvatar;
+
             string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "Defaults", "Profile.png");
-            return File.Exists(path) ? Image.FromFile(path) : new Bitmap(64, 64);
+            if (File.Exists(path))
+            {
+                using (var tempImage = Image.FromFile(path))
+                {
+                    _defaultAvatar = new Bitmap(tempImage);
+                }
+            }
+            else
+            {
+                _defaultAvatar = new Bitmap(64, 64);
+            }
+
+            return _defaultAvatar;
+        }
+
+        // 清理方法
+        public void ClearImageCache()
+        {
+            foreach (var image in _championAvatarCache.Values)
+            {
+                image.Dispose();
+            }
+            _championAvatarCache.Clear();
+
+            _defaultAvatar?.Dispose();
+            _defaultAvatar = null;
         }
 
         /// <summary>
@@ -1475,6 +1518,9 @@ namespace League.Managers
             _cachedPlayerMatchInfos.Clear();
             playerCache.Clear();
             _cardBySummonerId.Clear();
+
+            // 清理卡片列表缓存图片
+            ClearImageCache();
 
             // 新增清理
             _positionInfo.Clear();
