@@ -22,12 +22,14 @@ namespace League
 {
     public partial class FormMain : Form
     {
+        // 添加 WebSocket 管理器
+        private LcuWebSocketManager? _webSocketManager;
+
         // 管理器实例
         private FormUiStateManager? _uiManager;
         private GameFlowWatcher? _gameFlowWatcher;
         private PlayerCardManager? _playerCardManager;
         private MatchQueryProcessor? _matchQueryProcessor;
-        private MessageSender? _messageSender;
         private ConfigUpdateManager? _configUpdateManager;
         private MatchDetailManager? _matchDetailManager;
 
@@ -53,7 +55,6 @@ namespace League
 
         // 战绩发送处理
         private ChatMessageBuilder? _chatMessageBuilder;
-        private InGameChatSender? _inGameChatSender;
 
         public FormMain()
         {
@@ -63,11 +64,18 @@ namespace League
 
         private void InitializeManagers()
         {
+            // UI提示处理
             _uiManager = new FormUiStateManager(this);
+
+            // 选人阶段卡片战绩查询
             _matchQueryProcessor = new MatchQueryProcessor();
+
+            // 选人阶段卡片管理器
             _playerCardManager = new PlayerCardManager(this, _matchQueryProcessor);
+
+            // 游戏流程监视器
             _gameFlowWatcher = new GameFlowWatcher(this, _uiManager, _playerCardManager, _matchQueryProcessor);
-            _messageSender = new MessageSender();
+
             _configUpdateManager = new ConfigUpdateManager(this);
             _matchDetailManager = new MatchDetailManager(this);
             _chatMessageBuilder = new ChatMessageBuilder(GetCachedPlayerInfos);
@@ -147,10 +155,14 @@ namespace League
                         _uiManager!.LcuReady = true;
                         _lcuPoller.Stop();
 
-                        await InitializeAfterLcuConnected();
+                        // 在API连接成功后初始化WebSocket管理器
+                        _webSocketManager = new LcuWebSocketManager(Globals.lcuClient);
+                        bool wsInitialized = await _webSocketManager.InitializeAsync();
 
-                        // LCU 连接成功之后再创建消息发送监听
-                        _inGameChatSender = new InGameChatSender(Globals.lcuClient);
+                        Debug.WriteLine($"[WebSocket] 初始化{(wsInitialized ? "成功" : "失败")}");
+
+                        // 初始化英雄资源，及查询SGP服务
+                        await InitializeAfterLcuConnected();
                     }
                     else
                     {
@@ -392,12 +404,6 @@ namespace League
         // 🔥 新增：我方队伍发送（F9/F11通用）
         private async Task HandleMyTeam()
         {
-            if (_inGameChatSender == null)
-            {
-                Debug.WriteLine("[HandleMyTeam] InGameChatSender 未初始化，跳过");
-                return;
-            }
-
             string phase = await GetGameflowPhaseSafe();
             if (phase != "InProgress")
             {
@@ -415,22 +421,13 @@ namespace League
             string msg = _chatMessageBuilder!.BuildMyTeamSummary(myTeam);
             if (string.IsNullOrWhiteSpace(msg)) return;
 
-            //bool success = await Globals.lcuClient.SendInGameMessageAsync(msg);
-            bool success = await Globals.lcuClient.SendMessageComprehensive(msg);
-            //bool success = GameChatInputSender.Send(msg);
-
+            bool success = await Globals.lcuClient.SendInGameMessageAsync(msg);
             Debug.WriteLine($"[F9] 发送结果: {(success ? "成功" : "失败")}");
         }
 
         // 🔥 新增：我方+敌方发送（F12）
         private async Task HandleFullTeam()
         {
-            if (_inGameChatSender == null)
-            {
-                Debug.WriteLine("[HandleFullTeam] InGameChatSender 未初始化，跳过");
-                return;
-            }
-
             string phase = await GetGameflowPhaseSafe();
             if (phase != "InProgress")
             {
@@ -445,9 +442,7 @@ namespace League
             string msg = _chatMessageBuilder!.BuildFullTeamSummary(myTeam, enemyTeam);
             if (string.IsNullOrWhiteSpace(msg)) return;
 
-            bool success = await Globals.lcuClient.SendMessageComprehensive(msg);
-            //bool success = GameChatInputSender.Send(msg);
-
+            bool success = await Globals.lcuClient.SendInGameMessageAsync(msg);
             Debug.WriteLine($"[F12] 发送结果: {(success ? "成功" : "失败")}");
         }
 
@@ -820,6 +815,9 @@ namespace League
             _gameFlowWatcher?.StopGameflowWatcher();
             _lcuPoller?.Stop();
             _tab1Poller?.Stop();
+
+            // 清理WebSocket管理器
+            _webSocketManager?.Dispose();
 
             // 卸载热键钩子
             UninstallKeyboardHook();

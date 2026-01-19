@@ -105,10 +105,6 @@ namespace League.Services
             _watcherCts?.Cancel();
             _watcherCts?.Dispose();
             _watcherCts = null;
-
-            _champSelectCts?.Cancel();
-            _champSelectCts?.Dispose();
-            _champSelectCts = null;
         }
 
         /// <summary>
@@ -252,7 +248,7 @@ namespace League.Services
         #region 3. 选人阶段核心逻辑 - 修复取消逻辑
 
         /// <summary>
-        /// 启动选人阶段处理 - 修复：改进取消逻辑
+        /// 启动选人阶段处理 - 修复：改进时序逻辑
         /// </summary>
         private async Task StartChampSelectProcessing()
         {
@@ -276,7 +272,7 @@ namespace League.Services
             try
             {
                 // 先短暂等待，确保UI清理完成
-                await Task.Delay(300, token);
+                await Task.Delay(800, token);
 
                 while (!token.IsCancellationRequested)
                 {
@@ -285,8 +281,16 @@ namespace League.Services
                         var currentPhase = await Globals.lcuClient.GetGameflowPhase();
                         if (currentPhase != "ChampSelect") break;
 
-                        // 更新我方队伍卡片
+                        // 【修正顺序】先更新我方队伍卡片（创建基础卡片）
                         await UpdateMyTeamCards();
+
+                        // 【然后】获取当前会话（用于补全）
+                        var session = await Globals.lcuClient.GetChampSelectSession();
+                        if (session != null)
+                        {
+                            // 【新增】在创建基础卡片后进行补全检查
+                            await CheckAndCompleteMyTeamInChampSelect(session);
+                        }
 
                         // 尝试自动预选
                         await TryAutoPreliminaryAsync();
@@ -315,13 +319,121 @@ namespace League.Services
                 Debug.WriteLine($"[StartChampSelectProcessing] 异常: {ex.Message}");
             }
         }
+        #endregion
 
+        #region 选人阶段检查补全我方队伍卡片
+        /// <summary>
+        /// 在选人阶段检查并补全我方队伍
+        /// </summary>
+        private async Task CheckAndCompleteMyTeamInChampSelect(JObject session)
+        {
+            try
+            {
+                // 获取我方队伍数据
+                var myTeam = session["myTeam"] as JArray;
+                if (myTeam == null || myTeam.Count == 0) return;
+
+                Debug.WriteLine($"[选人阶段补全] 开始检查我方{myTeam.Count}名玩家");
+
+                // 等待一下，确保基础卡片已经创建
+                await Task.Delay(500);
+
+                // 构建完整session数据（包含我方和敌方）
+                var fullSession = BuildFullSessionFromChampSelect(session);
+
+                // 【重要】设置标记，表示这是选人阶段的补全
+                // 这样 PlayerCardManager 可以知道哪些卡片是刚刚创建的
+                await _cardManager.CheckAndCompleteMissingCards(fullSession, isMyTeamPhase: true,
+                    isChampSelectPhase: true);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[选人阶段补全] 异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 从选人会话构建完整session
+        /// </summary>
+        private JArray BuildFullSessionFromChampSelect(JObject session)
+        {
+            var fullPlayers = new JArray();
+
+            try
+            {
+                // 添加我方队伍
+                var myTeam = session["myTeam"] as JArray;
+                if (myTeam != null)
+                {
+                    for (int i = 0; i < myTeam.Count; i++)
+                    {
+                        var player = myTeam[i];
+
+                        // 创建新的JObject并复制属性
+                        var modifiedPlayer = new JObject();
+
+                        // 正确的方式复制属性
+                        foreach (var prop in player.Children<JProperty>())
+                        {
+                            modifiedPlayer[prop.Name] = prop.Value;
+                        }
+
+                        // 添加team和cellId信息
+                        modifiedPlayer["team"] = player["team"]?.Value<int>() ?? 1; // 我方通常是team 1
+                        modifiedPlayer["cellId"] = player["cellId"]?.Value<int>() ?? i;
+
+                        fullPlayers.Add(modifiedPlayer);
+
+                        // 调试信息
+                        long sid = modifiedPlayer["summonerId"]?.Value<long>() ?? 0;
+                        string name = modifiedPlayer["gameName"]?.ToString() ?? "无名";
+                        Debug.WriteLine($"[选人数据] 我方玩家{i}: sid={sid}, name='{name}'");
+                    }
+                }
+
+                // 添加敌方队伍（虽然在选人阶段是空的，但保留结构）
+                var theirTeam = session["theirTeam"] as JArray;
+                if (theirTeam != null)
+                {
+                    for (int i = 0; i < theirTeam.Count; i++)
+                    {
+                        var player = theirTeam[i];
+
+                        // 创建新的JObject并复制属性
+                        var modifiedPlayer = new JObject();
+
+                        // 正确的方式复制属性
+                        foreach (var prop in player.Children<JProperty>())
+                        {
+                            modifiedPlayer[prop.Name] = prop.Value;
+                        }
+
+                        // 添加team和cellId信息
+                        modifiedPlayer["team"] = player["team"]?.Value<int>() ?? 2; // 敌方通常是team 2
+                        modifiedPlayer["cellId"] = player["cellId"]?.Value<int>() ?? (i + 5);
+
+                        fullPlayers.Add(modifiedPlayer);
+
+                        // 调试信息
+                        long sid = modifiedPlayer["summonerId"]?.Value<long>() ?? 0;
+                        Debug.WriteLine($"[选人数据] 敌方玩家{i}: sid={sid}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[构建选人数据] 异常: {ex.Message}");
+            }
+
+            Debug.WriteLine($"[选人数据] 共构建 {fullPlayers.Count} 名玩家数据");
+            return fullPlayers;
+        }
         #endregion
 
         #region 4. 队伍卡片显示
 
         /// <summary>
-        /// 更新我方队伍卡片 - 修复：添加 session 获取失败处理
+        /// 更新我方队伍卡片
         /// </summary>
         private async Task UpdateMyTeamCards()
         {
@@ -358,6 +470,11 @@ namespace League.Services
                 if (_form.lastChampSelectSnapshot.Count == 0 || !_form.lastChampSelectSnapshot.SequenceEqual(currentSnapshot))
                 {
                     await ProcessMyTeam(myTeam, currentSnapshot);
+                }
+                else
+                {
+                    // 如果没有变化，但仍然需要检查卡片状态
+                    Debug.WriteLine("[UpdateMyTeamCards] 队伍没有变化，跳过创建");
                 }
             }
             catch (Exception ex)
@@ -396,47 +513,28 @@ namespace League.Services
         }
 
         /// <summary>
-        /// 显示敌方队伍卡片 - 修复：设置游戏模式
+        /// 显示敌方队伍卡片
         /// </summary>
         private async Task ShowEnemyTeamCards()
         {
             try
             {
-                //Debug.WriteLine("[显示敌方队伍] 开始获取敌方数据");
+                Debug.WriteLine("[显示敌方队伍] 开始获取敌方数据");
 
                 // 获取当前玩家信息
                 var currentSummoner = await Globals.lcuClient.GetCurrentSummoner();
-                if (currentSummoner == null)
-                {
-                    Debug.WriteLine("[显示敌方队伍] 无法获取当前玩家");
-                    return;
-                }
+                if (currentSummoner == null) return;
 
                 string myPuuid = currentSummoner["puuid"]?.ToString();
-                if (string.IsNullOrEmpty(myPuuid))
-                {
-                    Debug.WriteLine("[显示敌方队伍] 当前玩家puuid为空");
-                    return;
-                }
+                if (string.IsNullOrEmpty(myPuuid)) return;
 
                 // 获取游戏会话数据
                 var sessionData = await Globals.lcuClient.GetGameSession();
-                if (sessionData == null)
-                {
-                    Debug.WriteLine("[显示敌方队伍] 无法获取游戏会话");
-                    return;
-                }
-
-                // 保存完整session用于补全
-                var fullSession = ExtractFullSession(sessionData);
+                if (sessionData == null) return;
 
                 var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
                 var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
-                if (teamOne == null || teamTwo == null)
-                {
-                    Debug.WriteLine("[显示敌方队伍] 队伍数据不完整");
-                    return;
-                }
+                if (teamOne == null || teamTwo == null) return;
 
                 // 判断自己在哪一队
                 bool isInTeamOne = teamOne.Any(t =>
@@ -455,16 +553,37 @@ namespace League.Services
                     return;
                 }
 
-                //Debug.WriteLine($"[显示敌方队伍] 找到敌方 {enemyTeam.Count} 人，显示在行 {enemyRow}");
+                Debug.WriteLine($"[显示敌方队伍] 找到敌方 {enemyTeam.Count} 人，显示在行 {enemyRow}");
 
-                // 先创建基础卡片
+                // 先创建基础卡片，并确保UI完成
                 await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
 
-                // 然后异步填充详细数据
+                // 等待UI线程完成
+                await Task.Run(() => _form.Invoke(() => { }));
+
+                // 【修正这里】调用正确的方法名
+                var fullSession = BuildFullSessionFromGameSession(teamOne, teamTwo);
+
+                // 延迟执行补全检查，确保基础卡片已完全创建
+                await Task.Delay(2000);
+
+                // 【新增】在显示敌方队伍后，执行全局补全检查
+                if (_cardManager != null)
+                {
+                    // 这次是游戏阶段，不限制队伍类型
+                    // 注意：这里设置 isChampSelectPhase: false
+                    await _cardManager.CheckAndCompleteMissingCards(fullSession,
+                        isMyTeamPhase: false,
+                        isChampSelectPhase: false,
+                        retryCount: 2);
+                }
+
+                // 异步填充详细数据（放在最后，确保基础卡片已存在）
                 _ = Task.Run(async () =>
                 {
                     try
                     {
+                        await Task.Delay(1500); // 等待补全检查完成
                         await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
                     }
                     catch (Exception ex)
@@ -472,14 +591,6 @@ namespace League.Services
                         Debug.WriteLine($"[填充敌方数据] 异常: {ex.Message}");
                     }
                 });
-
-                // 在显示敌方队伍后，检查并补全缺失卡片
-                await Task.Delay(1000); // 等待一下，确保基础卡片已创建
-
-                if (_cardManager != null)
-                {
-                    await _cardManager.CheckAndCompleteMissingCards(fullSession);
-                }
             }
             catch (Exception ex)
             {
@@ -488,41 +599,78 @@ namespace League.Services
         }
 
         /// <summary>
-        /// 提取完整的玩家session数据
+        /// 从游戏会话构建完整session（修正方法名）
         /// </summary>
-        private JArray ExtractFullSession(JObject sessionData)
+        private JArray BuildFullSessionFromGameSession(JArray teamOne, JArray teamTwo)
         {
             var fullPlayers = new JArray();
 
             try
             {
-                var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
-                var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
-
+                // 添加队伍1玩家，标记为team=1
                 if (teamOne != null)
                 {
-                    foreach (var player in teamOne)
+                    for (int i = 0; i < teamOne.Count; i++)
                     {
-                        player["team"] = 1; // 标记队伍
-                        fullPlayers.Add(player);
+                        var player = teamOne[i];
+
+                        // 创建新的JObject
+                        var modifiedPlayer = new JObject();
+
+                        // 复制所有属性
+                        foreach (var prop in player.Children<JProperty>())
+                        {
+                            modifiedPlayer[prop.Name] = prop.Value;
+                        }
+
+                        // 添加team和cellId信息
+                        modifiedPlayer["team"] = 1;
+                        modifiedPlayer["cellId"] = i; // 假设按顺序分配
+
+                        fullPlayers.Add(modifiedPlayer);
+
+                        // 调试信息
+                        long sid = modifiedPlayer["summonerId"]?.Value<long>() ?? 0;
+                        string name = modifiedPlayer["summonerName"]?.ToString() ?? "无名";
+                        Debug.WriteLine($"[游戏数据] 队伍1-{i}: sid={sid}, name='{name}'");
                     }
                 }
 
+                // 添加队伍2玩家，标记为team=2
                 if (teamTwo != null)
                 {
-                    foreach (var player in teamTwo)
+                    for (int i = 0; i < teamTwo.Count; i++)
                     {
-                        player["team"] = 2; // 标记队伍
-                        fullPlayers.Add(player);
+                        var player = teamTwo[i];
+
+                        // 创建新的JObject
+                        var modifiedPlayer = new JObject();
+
+                        // 复制所有属性
+                        foreach (var prop in player.Children<JProperty>())
+                        {
+                            modifiedPlayer[prop.Name] = prop.Value;
+                        }
+
+                        // 添加team和cellId信息
+                        modifiedPlayer["team"] = 2;
+                        modifiedPlayer["cellId"] = i + 5; // 敌方从5开始
+
+                        fullPlayers.Add(modifiedPlayer);
+
+                        // 调试信息
+                        long sid = modifiedPlayer["summonerId"]?.Value<long>() ?? 0;
+                        string name = modifiedPlayer["summonerName"]?.ToString() ?? "无名";
+                        Debug.WriteLine($"[游戏数据] 队伍2-{i}: sid={sid}, name='{name}'");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[提取完整session] 异常: {ex.Message}");
+                Debug.WriteLine($"[构建游戏数据] 异常: {ex.Message}");
             }
 
-            Debug.WriteLine($"[提取完整session] 共找到 {fullPlayers.Count} 名玩家");
+            Debug.WriteLine($"[游戏数据] 共构建 {fullPlayers.Count} 名玩家数据");
             return fullPlayers;
         }
         #endregion

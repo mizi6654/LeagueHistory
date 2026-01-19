@@ -623,9 +623,10 @@ namespace League.Managers
 
         #region 5. 卡片丢失补全
         /// <summary>
-        /// 检查并补全缺失的卡片（使用完整session数据）
+        /// 检查并补全缺失的卡片（增强版：支持精确位置跟踪）
         /// </summary>
-        public async Task CheckAndCompleteMissingCards(JArray fullSession)
+        public async Task CheckAndCompleteMissingCards(JArray fullSession, bool isMyTeamPhase = false,
+            bool isChampSelectPhase = false, int retryCount = 2)
         {
             if (fullSession == null || fullSession.Count == 0)
             {
@@ -638,19 +639,63 @@ namespace League.Managers
 
             try
             {
-                // 分析当前UI状态
-                var missingPositions = FindMissingCardPositions();
+                // 阶段标识
+                string phaseName = isMyTeamPhase ? "选人阶段" : "游戏阶段";
+                phaseName += isChampSelectPhase ? "(选人)" : "(游戏)";
+
+                Debug.WriteLine($"[{phaseName}补全] 开始检查缺失卡片，有{fullSession.Count}名玩家数据");
+
+                // 记录开始时间
+                var startTime = DateTime.Now;
+
+                // 【重要】如果是选人阶段，需要额外延迟，确保基础卡片已创建
+                if (isChampSelectPhase)
+                {
+                    await Task.Delay(800); // 等待基础卡片创建完成
+                }
+                else
+                {
+                    await Task.Delay(500); // 游戏阶段正常延迟
+                }
+
+                // 【关键改进】使用增强的位置查找方法
+                var missingPositions = FindMissingCardsWithPositionTracking(fullSession, isMyTeamPhase, isChampSelectPhase);
 
                 if (missingPositions.Count == 0)
                 {
-                    Debug.WriteLine("[补全检查] 没有发现缺失的卡片");
+                    Debug.WriteLine($"[{phaseName}补全] 没有发现缺失的卡片");
                     return;
                 }
 
-                Debug.WriteLine($"[补全检查] 发现 {missingPositions.Count} 个缺失位置");
+                Debug.WriteLine($"[{phaseName}补全] 发现 {missingPositions.Count} 个缺失位置");
+
+                // 打印每个缺失位置的详细信息
+                foreach (var (row, col, expectedSummonerId, foundSummonerId) in missingPositions)
+                {
+                    string teamName = row == 0 ? "我方" : "敌方";
+                    Debug.WriteLine($"[缺失详情] {teamName}位置({row},{col}): 预期sid={expectedSummonerId}, 实际sid={foundSummonerId}");
+                }
 
                 // 尝试从完整session中查找并补全
-                await FillMissingCardsFromFullSession(missingPositions);
+                bool success = await FillMissingCardsWithPrecision(missingPositions, fullSession, isMyTeamPhase);
+
+                // 计算耗时
+                var elapsed = DateTime.Now - startTime;
+                Debug.WriteLine($"[{phaseName}补全] 补全完成，耗时{elapsed.TotalMilliseconds}ms，成功={success}");
+
+                // 如果失败且有重试次数，重试
+                if (!success && retryCount > 0)
+                {
+                    Debug.WriteLine($"[{phaseName}补全] 第一次补全失败，等待后重试（剩余重试次数：{retryCount}）");
+                    await Task.Delay(1500); // 增加等待时间
+
+                    // 重新检查缺失位置
+                    missingPositions = FindMissingCardsWithPositionTracking(fullSession, isMyTeamPhase, isChampSelectPhase);
+                    if (missingPositions.Count > 0)
+                    {
+                        success = await FillMissingCardsWithPrecision(missingPositions, fullSession, isMyTeamPhase);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -659,77 +704,478 @@ namespace League.Managers
         }
 
         /// <summary>
-        /// 查找缺失卡片的位置
+        /// 查找缺失卡片位置（增强版：支持隐藏玩家判断）
         /// </summary>
-        private List<(int row, int col)> FindMissingCardPositions()
+        private List<(int row, int col, long expectedSummonerId, long foundSummonerId)>
+            FindMissingCardsWithPositionTracking(JArray fullSession, bool isMyTeamPhase, bool isChampSelectPhase = false)
         {
-            var missing = new List<(int row, int col)>();
+            var missing = new List<(int row, int col, long expectedSummonerId, long foundSummonerId)>();
 
-            // 检查TableLayoutPanel中的空位
-            for (int row = 0; row < 2; row++) // 假设2行：0=我方，1=敌方
+            try
             {
-                for (int col = 0; col < 5; col++) // 每队5人
-                {
-                    var control = _form.tableLayoutPanel1.GetControlFromPosition(col, row);
+                // 获取UI卡片信息
+                var uiCards = BuildUICardPositions();
 
-                    // 位置为空或者控件有问题
-                    if (control == null || control.Controls.Count == 0)
+                // 建立预期位置映射
+                var expectedPositions = BuildExpectedPositionMap(fullSession, isMyTeamPhase);
+
+                // 检查每个预期位置
+                foreach (var position in expectedPositions)
+                {
+                    var (row, col) = position.Key;
+                    var player = position.Value;
+                    long expectedSid = player["summonerId"]?.Value<long>() ?? 0;
+                    int expectedChampionId = player["championId"]?.Value<int>() ?? 0;
+                    string visibility = player["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
+                    bool isHidden = visibility == "HIDDEN" || expectedSid == 0;
+
+                    // 检查UI中这个位置是否有卡片
+                    bool positionHasCard = uiCards.TryGetValue((row, col), out var cardInfo);
+                    long actualSid = positionHasCard ? cardInfo.SummonerId : -1;
+
+                    // 判断是否需要补全
+                    bool needToComplete = false;
+                    string reason = "";
+
+                    if (!positionHasCard)
                     {
-                        missing.Add((row, col));
-                        Debug.WriteLine($"[查找缺失] 位置({row},{col})为空");
+                        // 位置完全为空
+                        needToComplete = true;
+                        reason = "位置完全为空";
+                    }
+                    else if (cardInfo.IsPlaceholder)
+                    {
+                        // 位置是占位卡片
+                        needToComplete = true;
+                        reason = "位置是占位卡片";
+                    }
+                    else if (isHidden)
+                    {
+                        // 预期是隐藏玩家，但当前位置不是隐藏玩家
+                        if (!cardInfo.IsHiddenPlayer)
+                        {
+                            needToComplete = true;
+                            reason = "预期隐藏玩家但当前位置不是";
+                        }
+                        // 如果当前位置已经是隐藏玩家，检查英雄是否匹配
+                        else if (cardInfo.ChampionId > 0 && expectedChampionId > 0 &&
+                                 cardInfo.ChampionId != expectedChampionId)
+                        {
+                            needToComplete = true;
+                            reason = $"隐藏玩家英雄不匹配: 预期{expectedChampionId}, 实际{cardInfo.ChampionId}";
+                        }
+                    }
+                    else if (expectedSid > 0)
+                    {
+                        // 非隐藏玩家：检查ID是否匹配
+                        if (actualSid > 0 && expectedSid != actualSid)
+                        {
+                            // 检查这个玩家是否在其他位置
+                            bool playerExistsElsewhere = uiCards.Any(kvp =>
+                                kvp.Value.SummonerId == expectedSid && kvp.Key != (row, col));
+
+                            if (playerExistsElsewhere)
+                            {
+                                // 玩家在其他位置，说明只是位置调换
+                                Debug.WriteLine($"[位置调换] 玩家{expectedSid}在位置({row},{col})被调换");
+                            }
+                            else
+                            {
+                                needToComplete = true;
+                                reason = $"玩家ID不匹配: 预期{expectedSid}, 实际{actualSid}";
+                            }
+                        }
+                        else if (actualSid <= 0 && !cardInfo.IsHiddenPlayer)
+                        {
+                            // 位置不是隐藏玩家，但预期有玩家
+                            needToComplete = true;
+                            reason = $"预期有玩家{expectedSid}但位置不是隐藏玩家";
+                        }
+                    }
+
+                    if (needToComplete)
+                    {
+                        missing.Add((row, col, expectedSid, actualSid));
+                        Debug.WriteLine($"[缺失检测] 位置({row},{col}): {reason}");
                     }
                 }
+
+                // 【新增】检查是否有隐藏玩家被遗漏
+                CheckHiddenPlayersMissing(fullSession, uiCards, missing);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[缺失检测] 异常: {ex.Message}");
             }
 
             return missing;
         }
 
         /// <summary>
-        /// 从完整session中补全缺失卡片
+        /// 检查隐藏玩家是否被遗漏
         /// </summary>
-        private async Task FillMissingCardsFromFullSession(List<(int row, int col)> missingPositions)
+        private void CheckHiddenPlayersMissing(JArray fullSession, Dictionary<(int row, int col), UICardInfo> uiCards,
+            List<(int row, int col, long expectedSummonerId, long foundSummonerId)> missing)
         {
-            if (_fullSessionData == null) return;
+            try
+            {
+                // 统计预期中的隐藏玩家
+                var expectedHiddenPlayers = new List<(int row, int col, int championId)>();
 
-            foreach (var (row, col) in missingPositions)
+                foreach (var player in fullSession)
+                {
+                    long sid = player["summonerId"]?.Value<long>() ?? 0;
+                    int championId = player["championId"]?.Value<int>() ?? 0;
+                    string visibility = player["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
+                    bool isHidden = visibility == "HIDDEN" || sid == 0;
+
+                    if (isHidden && championId > 0)
+                    {
+                        int team = player["team"]?.Value<int>() ?? -1;
+                        int cellId = player["cellId"]?.Value<int>() ?? -1;
+
+                        if (team != -1 && cellId != -1)
+                        {
+                            int row = team == 1 ? 0 : 1;
+                            int col = cellId % 5;
+
+                            expectedHiddenPlayers.Add((row, col, championId));
+                            Debug.WriteLine($"[隐藏玩家] 预期位置({row},{col})有隐藏玩家，英雄{championId}");
+                        }
+                    }
+                }
+
+                // 检查每个预期隐藏玩家的位置
+                foreach (var (row, col, championId) in expectedHiddenPlayers)
+                {
+                    if (uiCards.TryGetValue((row, col), out var cardInfo))
+                    {
+                        if (cardInfo.IsHiddenPlayer)
+                        {
+                            // 已经是隐藏玩家，检查英雄是否匹配
+                            if (cardInfo.ChampionId > 0 && championId > 0 &&
+                                cardInfo.ChampionId != championId)
+                            {
+                                missing.Add((row, col, 0, cardInfo.SummonerId));
+                                Debug.WriteLine($"[隐藏英雄不匹配] 位置({row},{col}): 预期英雄{championId}, 实际英雄{cardInfo.ChampionId}");
+                            }
+                        }
+                        else
+                        {
+                            // 位置不是隐藏玩家
+                            missing.Add((row, col, 0, cardInfo.SummonerId));
+                            Debug.WriteLine($"[隐藏玩家缺失] 位置({row},{col})应该有隐藏玩家但实际不是");
+                        }
+                    }
+                    else
+                    {
+                        // 位置完全为空
+                        missing.Add((row, col, 0, -1));
+                        Debug.WriteLine($"[隐藏玩家缺失] 位置({row},{col})应该有隐藏玩家但位置为空");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[检查隐藏玩家] 异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 建立当前UI中所有卡片的详细信息
+        /// </summary>
+        private Dictionary<(int row, int col), UICardInfo> BuildUICardPositions()
+        {
+            var uiCards = new Dictionary<(int row, int col), UICardInfo>();
+
+            for (int row = 0; row < 2; row++)
+            {
+                for (int col = 0; col < 5; col++)
+                {
+                    var control = _form.tableLayoutPanel1.GetControlFromPosition(col, row);
+                    var cardInfo = new UICardInfo();
+
+                    if (control is BorderPanel borderPanel && borderPanel.Controls.Count > 0)
+                    {
+                        var card = borderPanel.Controls[0] as PlayerCardControl;
+                        if (card != null && !card.IsDisposed)
+                        {
+                            cardInfo.SummonerId = card.CurrentSummonerId;
+                            cardInfo.ChampionId = card.CurrentChampionId;
+                            cardInfo.DisplayName = card.lblPlayerName.Text;
+                            cardInfo.IsHiddenPlayer = cardInfo.DisplayName == "隐藏玩家" ||
+                                                     cardInfo.DisplayName == "玩家未找到" ||
+                                                     cardInfo.DisplayName == "查询失败";
+                            cardInfo.IsPlaceholder = cardInfo.DisplayName == "玩家未找到" ||
+                                                    cardInfo.DisplayName == "查询失败" ||
+                                                    cardInfo.SummonerId < 0;
+
+                            // 获取英雄名称
+                            if (cardInfo.ChampionId > 0)
+                            {
+                                cardInfo.ChampionName = Globals.resLoading.GetChampionById(cardInfo.ChampionId)?.Name ?? "未知";
+                            }
+
+                            uiCards[(row, col)] = cardInfo;
+
+                            Debug.WriteLine($"[UI信息] 位置({row},{col}): sid={cardInfo.SummonerId}, " +
+                                           $"champ={cardInfo.ChampionId}({cardInfo.ChampionName}), " +
+                                           $"name='{cardInfo.DisplayName}', " +
+                                           $"hidden={cardInfo.IsHiddenPlayer}, placeholder={cardInfo.IsPlaceholder}");
+                        }
+                    }
+                }
+            }
+
+            Debug.WriteLine($"[UI信息] 共找到{uiCards.Count}个卡片信息");
+            return uiCards;
+        }
+
+        /// <summary>
+        /// UI卡片信息类
+        /// </summary>
+        private class UICardInfo
+        {
+            public long SummonerId { get; set; }
+            public int ChampionId { get; set; }
+            public string ChampionName { get; set; }
+            public string DisplayName { get; set; }
+            public bool IsHiddenPlayer { get; set; }
+            public bool IsPlaceholder { get; set; }
+        }
+
+        /// <summary>
+        /// 建立预期位置映射（最终版：支持隐藏玩家和智能匹配）
+        /// </summary>
+        private Dictionary<(int row, int col), JToken> BuildExpectedPositionMap(JArray fullSession, bool isMyTeamPhase)
+        {
+            var positionMap = new Dictionary<(int row, int col), JToken>();
+
+            try
+            {
+                // 第一步：按队伍和cellId进行基础映射
+                foreach (var player in fullSession)
+                {
+                    int team = player["team"]?.Value<int>() ?? -1;
+                    int cellId = player["cellId"]?.Value<int>() ?? -1;
+                    long sid = player["summonerId"]?.Value<long>() ?? 0;
+
+                    if (team == -1) continue;
+
+                    int row = team == 1 ? 0 : 1;
+                    int col = cellId % 5;
+
+                    // 对于选人阶段且是MyTeam阶段，只处理我方
+                    if (isMyTeamPhase && row != 0) continue;
+
+                    positionMap[(row, col)] = player;
+                    Debug.WriteLine($"[基础映射] 位置({row},{col}) <- sid={sid}, cellId={cellId}");
+                }
+
+                // 第二步：如果有位置冲突，进行智能调整
+                AdjustPositionConflicts(positionMap, fullSession, isMyTeamPhase);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[建立映射] 异常: {ex.Message}");
+            }
+
+            return positionMap;
+        }
+
+        /// <summary>
+        /// 调整位置冲突
+        /// </summary>
+        private void AdjustPositionConflicts(Dictionary<(int row, int col), JToken> positionMap,
+            JArray fullSession, bool isMyTeamPhase)
+        {
+            try
+            {
+                // 检查是否有重复的玩家被映射到多个位置
+                var playerPositions = new Dictionary<long, List<(int row, int col)>>();
+
+                foreach (var kvp in positionMap)
+                {
+                    var player = kvp.Value;
+                    long sid = player["summonerId"]?.Value<long>() ?? 0;
+
+                    if (sid > 0)
+                    {
+                        if (!playerPositions.ContainsKey(sid))
+                            playerPositions[sid] = new List<(int row, int col)>();
+
+                        playerPositions[sid].Add(kvp.Key);
+                    }
+                }
+
+                // 处理有冲突的玩家
+                foreach (var kvp in playerPositions)
+                {
+                    if (kvp.Value.Count > 1)
+                    {
+                        Debug.WriteLine($"[位置冲突] 玩家{kvp.Key}被映射到{string.Join(",", kvp.Value)}");
+
+                        // 保留第一个位置，其他位置重新分配
+                        var firstPosition = kvp.Value[0];
+                        for (int i = 1; i < kvp.Value.Count; i++)
+                        {
+                            var conflictPosition = kvp.Value[i];
+                            positionMap.Remove(conflictPosition);
+                            Debug.WriteLine($"[冲突解决] 移除冲突位置{conflictPosition}");
+                        }
+                    }
+                }
+
+                // 重新填充被移除的位置
+                var emptyPositions = GetEmptyPositions(positionMap, isMyTeamPhase);
+                var unassignedPlayers = GetUnassignedPlayers(fullSession, positionMap);
+
+                // 智能分配未分配的玩家到空位置
+                foreach (var position in emptyPositions)
+                {
+                    if (unassignedPlayers.Count == 0) break;
+
+                    var player = unassignedPlayers[0];
+                    positionMap[position] = player;
+                    unassignedPlayers.RemoveAt(0);
+
+                    long sid = player["summonerId"]?.Value<long>() ?? 0;
+                    Debug.WriteLine($"[智能分配] 位置{position} <- 玩家{sid}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[调整冲突] 异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 获取空位置
+        /// </summary>
+        private List<(int row, int col)> GetEmptyPositions(Dictionary<(int row, int col), JToken> positionMap, bool isMyTeamPhase)
+        {
+            var emptyPositions = new List<(int row, int col)>();
+
+            int maxRow = isMyTeamPhase ? 0 : 1; // 如果是选人阶段只检查我方
+
+            for (int row = 0; row <= maxRow; row++)
+            {
+                for (int col = 0; col < 5; col++)
+                {
+                    if (!positionMap.ContainsKey((row, col)))
+                    {
+                        emptyPositions.Add((row, col));
+                    }
+                }
+            }
+
+            return emptyPositions;
+        }
+
+        /// <summary>
+        /// 获取未分配的玩家
+        /// </summary>
+        private List<JToken> GetUnassignedPlayers(JArray fullSession, Dictionary<(int row, int col), JToken> positionMap)
+        {
+            var assignedPlayerIds = new HashSet<long>();
+
+            foreach (var player in positionMap.Values)
+            {
+                long sid = player["summonerId"]?.Value<long>() ?? 0;
+                if (sid > 0) assignedPlayerIds.Add(sid);
+            }
+
+            return fullSession
+                .Where(p =>
+                {
+                    long sid = p["summonerId"]?.Value<long>() ?? 0;
+                    return sid > 0 && !assignedPlayerIds.Contains(sid);
+                })
+                .ToList();
+        }
+
+        /// <summary>
+        /// 精准补全缺失卡片（改进版：只补全真正缺失的）
+        /// </summary>
+        private async Task<bool> FillMissingCardsWithPrecision(
+            List<(int row, int col, long expectedSummonerId, long foundSummonerId)> missingPositions,
+            JArray fullSession,
+            bool isMyTeamPhase)
+        {
+            if (missingPositions.Count == 0) return true;
+
+            bool allSuccess = true;
+            int successCount = 0;
+            int skippedCount = 0;
+
+            Debug.WriteLine($"[精准补全] 开始处理{missingPositions.Count}个可能缺失的位置");
+
+            foreach (var (row, col, expectedSid, foundSid) in missingPositions)
             {
                 try
                 {
-                    // 从完整session中查找对应位置的玩家
-                    var player = FindPlayerInFullSession(row, col);
+                    string teamName = row == 0 ? "我方" : "敌方";
+
+                    // 检查这个玩家是否已经在UI中的其他位置
+                    bool playerAlreadyInUI = IsPlayerAlreadyInUI(expectedSid, (row, col));
+
+                    if (playerAlreadyInUI && foundSid > 0)
+                    {
+                        // 玩家已经在UI中，只是位置不对，跳过补全
+                        Debug.WriteLine($"[跳过调换] {teamName}位置({row},{col})的玩家{expectedSid}已在其他位置");
+                        skippedCount++;
+                        continue;
+                    }
+
+                    if (foundSid == -1) // 位置完全为空
+                    {
+                        Debug.WriteLine($"[补全处理] {teamName}位置({row},{col})完全为空，需要补全玩家{expectedSid}");
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"[补全处理] {teamName}位置({row},{col})玩家{expectedSid}完全缺失");
+                    }
+
+                    // 精确查找玩家
+                    JToken player = FindPlayerByPositionAndId(row, col, expectedSid, fullSession);
 
                     if (player == null)
                     {
-                        Debug.WriteLine($"[补全] 位置({row},{col})在完整session中找不到对应玩家");
+                        Debug.WriteLine($"[补全失败] 位置({row},{col})找不到对应玩家");
+                        allSuccess = false;
+
+                        // 只有在位置完全为空时才创建占位卡片
+                        if (foundSid == -1)
+                        {
+                            await CreatePlaceholderCard(row, col, row == 0);
+                        }
                         continue;
                     }
 
-                    long sid = player["summonerId"]?.Value<long>() ?? 0;
-                    int cid = player["championId"]?.Value<int>() ?? 0;
+                    long actualSid = player["summonerId"]?.Value<long>() ?? 0;
+                    int championId = player["championId"]?.Value<int>() ?? 0;
 
-                    // 检查是否已经查询过
-                    if (sid > 0 && _queriedPlayers.Contains(sid))
+                    Debug.WriteLine($"[补全找到] 位置({row},{col}): sid={actualSid}, champ={championId}");
+
+                    // 只在位置完全为空时才创建基础卡片
+                    if (foundSid == -1)
                     {
-                        Debug.WriteLine($"[补全] 位置({row},{col})的玩家{sid}已查询过，跳过");
-                        continue;
+                        await Task.Run(() => _form.Invoke(() =>
+                        {
+                            CreateSingleBasicCard(player, row, col, row == 0);
+                        }));
+                        successCount++;
                     }
-
-                    Debug.WriteLine($"[补全] 为位置({row},{col})创建卡片: sid={sid}, champ={cid}");
-
-                    // 创建卡片
-                    await Task.Run(() => _form.Invoke(() =>
-                    {
-                        CreateSingleBasicCard(player, row, col, row == 0); // row==0是我方
-                    }));
 
                     // 如果是非隐藏玩家，异步查询详细信息
                     string visibility = player["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
-                    if (visibility != "HIDDEN" && sid > 0)
+                    if (visibility != "HIDDEN" && actualSid > 0)
                     {
                         _ = Task.Run(async () =>
                         {
                             try
                             {
+                                await Task.Delay(1000);
                                 var info = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(player);
                                 if (info != null && info.Player != null)
                                 {
@@ -749,35 +1195,139 @@ namespace League.Managers
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"[补全单个] 位置({row},{col})异常: {ex.Message}");
+                    allSuccess = false;
                 }
             }
+
+            Debug.WriteLine($"[精准补全] 完成: 成功{successCount}个，跳过{skippedCount}个，共{missingPositions.Count}个位置");
+            return allSuccess;
         }
 
         /// <summary>
-        /// 在完整session中查找对应位置的玩家
+        /// 检查玩家是否已经在UI中的其他位置（简化版）
         /// </summary>
-        private JToken FindPlayerInFullSession(int targetRow, int targetCol)
+        private bool IsPlayerAlreadyInUI(long summonerId, (int row, int col) excludePosition)
         {
-            if (_fullSessionData == null) return null;
+            var uiCards = BuildUICardPositions();
+            return IsPlayerAlreadyInUI(summonerId, 0, false, excludePosition, uiCards);
+        }
 
-            // 遍历完整session中的玩家
-            foreach (var player in _fullSessionData)
+        /// <summary>
+        /// 检查玩家是否已经在UI中的其他位置（完整版）
+        /// </summary>
+        private bool IsPlayerAlreadyInUI(long summonerId, int championId, bool isHidden,
+            (int row, int col) excludePosition, Dictionary<(int row, int col), UICardInfo> uiCards)
+        {
+            foreach (var kvp in uiCards)
             {
-                int team = player["team"]?.Value<int>() ?? -1;
-                int cellId = player["cellId"]?.Value<int>() ?? -1;
+                var position = kvp.Key;
+                var cardInfo = kvp.Value;
 
-                // 确定行号：team 1=蓝色方(我方通常是0行)，team 2=红色方(敌方通常是1行)
-                // 需要根据实际情况调整映射
-                int row = (team == 1) ? 0 : 1;
-                int col = cellId % 5; // cellId 0-4是蓝色方，5-9是红色方
+                if (position.row == excludePosition.row && position.col == excludePosition.col)
+                    continue;
 
-                if (row == targetRow && col == targetCol)
+                if (isHidden)
                 {
-                    return player;
+                    // 对于隐藏玩家，通过英雄ID判断
+                    if (cardInfo.IsHiddenPlayer && championId > 0 && cardInfo.ChampionId == championId)
+                    {
+                        return true;
+                    }
+                }
+                else if (summonerId > 0)
+                {
+                    // 对于非隐藏玩家，通过summonerId判断
+                    if (cardInfo.SummonerId == summonerId)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 根据位置和ID精确查找玩家
+        /// </summary>
+        private JToken FindPlayerByPositionAndId(int row, int col, long expectedSid, JArray fullSession)
+        {
+            if (fullSession == null) return null;
+
+            // 策略1：如果有expectedSid，优先按ID查找
+            if (expectedSid > 0)
+            {
+                var playerById = fullSession.FirstOrDefault(p =>
+                    p["summonerId"]?.Value<long>() == expectedSid);
+
+                if (playerById != null)
+                {
+                    Debug.WriteLine($"[精确查找] 通过ID找到玩家: sid={expectedSid}");
+                    return playerById;
                 }
             }
 
-            return null;
+            // 策略2：按位置查找
+            int expectedTeam = row == 0 ? 1 : 2; // 行0对应team 1，行1对应team 2
+
+            var teamPlayers = fullSession
+                .Where(p => p["team"]?.Value<int>() == expectedTeam)
+                .ToList();
+
+            if (col < teamPlayers.Count)
+            {
+                var playerByPosition = teamPlayers[col];
+                Debug.WriteLine($"[精确查找] 通过位置找到玩家: 队伍{expectedTeam}第{col}个");
+                return playerByPosition;
+            }
+
+            // 策略3：返回第一个匹配队伍的玩家
+            return teamPlayers.FirstOrDefault();
+        }
+
+        /// <summary>
+        /// 创建占位卡片（当找不到玩家时）
+        /// </summary>
+        private async Task CreatePlaceholderCard(int row, int col, bool isMyTeam)
+        {
+            try
+            {
+                // 创建一个特殊ID，避免冲突
+                long placeholderId = -1000 - (row * 100 + col * 10);
+
+                Debug.WriteLine($"[创建占位] 位置({row},{col})创建占位卡片，ID={placeholderId}");
+
+                // 更新缓存映射
+                UpdateCacheMappings(placeholderId, 0, row, col);
+
+                // 创建占位信息
+                var placeholderInfo = new PlayerMatchInfo
+                {
+                    Player = new PlayerInfo
+                    {
+                        SummonerId = placeholderId,
+                        ChampionId = 0,
+                        ChampionName = "位置空",
+                        Avatar = LoadDefaultAvatar(),
+                        GameName = "玩家未找到",
+                        SoloRank = "---",
+                        FlexRank = "---",
+                        IsPublic = "[未知]",
+                        NameColor = GetTeamColor(row)
+                    },
+                    MatchItems = new List<ListViewItem>(),
+                    HeroIcons = new ImageList()
+                };
+
+                // 创建卡片
+                await Task.Run(() => _form.Invoke(() =>
+                {
+                    CreateLoadingPlayerMatch(placeholderInfo, isMyTeam, row, col);
+                }));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[创建占位卡片] 异常: {ex.Message}");
+            }
         }
         #endregion
 
@@ -818,7 +1368,7 @@ namespace League.Managers
             // 如果没有组队，使用默认的队伍颜色
             return row == 0 ? Color.Red : row == 1 ? Color.Blue : Color.Gray;
         }
-        
+
         /// <summary>
         /// 更新玩家名字颜色
         /// </summary>
