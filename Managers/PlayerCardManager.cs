@@ -1,4 +1,5 @@
 ﻿using League.Controls;
+using League.Extensions;
 using League.Models;
 using League.Networking;
 using League.Parsers;
@@ -20,556 +21,186 @@ namespace League.Managers
         private readonly MatchQueryProcessor _matchQueryProcessor;
 
         // 缓存相关
-        public readonly Dictionary<long, PlayerMatchInfo> _cachedPlayerMatchInfos = new();
+        private readonly Dictionary<long, PlayerMatchInfo> _cachedPlayerMatchInfos = new();
         private readonly Dictionary<long, int> _currentChampBySummoner = new();
         private readonly Dictionary<long, int> _summonerToColMap = new();
+        private readonly Dictionary<long, PlayerMatchInfo> playerMatchCache = new();
         private readonly Dictionary<(int row, int column), (long summonerId, int championId)> playerCache = new();
         private readonly ConcurrentDictionary<long, PlayerCardControl> _cardBySummonerId = new();
-
-        // 新增：存储每个位置的基础信息
-        private readonly Dictionary<(int row, int col), PlayerBasicInfo> _positionInfo = new();
-
-        // 新增：记录已经查询过的玩家
-        private readonly HashSet<long> _queriedPlayers = new();
-
-        // 新增：完整队伍数据缓存
-        private JArray _fullSessionData = null;
-
-        // 添加 Image 缓存
-        private readonly Dictionary<int, Image> _championAvatarCache = new();
-        private Image _defaultAvatar = null;
-
+        private static readonly ConcurrentDictionary<string, Image> _imageCache = new();
         public PlayerCardManager(FormMain form, MatchQueryProcessor matchQueryProcessor)
         {
             _form = form;
             _matchQueryProcessor = matchQueryProcessor;
+
+            // 关键：反向告诉 MatchQueryProcessor 我是谁
             matchQueryProcessor.SetPlayerCardManager(this);
         }
 
-        #region 1. 基础卡片创建
-
+        #region 卡片创建和更新
         /// <summary>
-        /// 创建基础卡片（立即显示英雄头像）
+        /// 创建基础卡片（只显示头像和基本信息）
         /// </summary>
         public async Task CreateBasicCardsOnly(JArray team, bool isMyTeam, int row)
         {
-            //Debug.WriteLine($"[创建基础卡片] {(isMyTeam ? "我方" : "敌方")} 行:{row}, 人数:{team?.Count ?? 0}");
+            //Debug.WriteLine($"[CreateBasicCardsOnly] 开始铺底座卡片 - {(isMyTeam ? "我方" : "敌方")} Row={row}，共 {team.Count} 人");
 
-            // 确保在UI线程中执行
-            await Task.Run(() => _form.Invoke(() =>
+            int col = 0;
+            foreach (var p in team)
             {
-                try
-                {
-                    if (team == null)
-                    {
-                        Debug.WriteLine("[创建基础卡片] team为null");
-                        return;
-                    }
+                long summonerId = (long)p["summonerId"];
+                int championId = (int)p["championId"];
 
-                    for (int col = 0; col < team.Count; col++)
+                // 更新映射
+                _currentChampBySummoner[summonerId] = championId;
+                _summonerToColMap[summonerId] = col;
+                var positionKey = (row, col);
+                playerCache[positionKey] = (summonerId, championId);
+
+                // 检查现有卡片
+                var existingPanel = _form.tableLayoutPanel1.GetControlFromPosition(col, row) as BorderPanel;
+                var existingCard = existingPanel?.Controls.Count > 0 ? existingPanel.Controls[0] as PlayerCardControl : null;
+
+                if (existingCard != null && !existingCard.IsDisposed)
+                {
+                    long oldSummonerId = existingCard.CurrentSummonerId;
+
+                    if (oldSummonerId == summonerId)
                     {
-                        CreateSingleBasicCard(team[col], row, col, isMyTeam);
+                        // 同一玩家，只更新头像
+                        if (existingCard.CurrentChampionId != championId)
+                        {
+                            //Debug.WriteLine($"[换英雄优化] Row={row}, Col={col}, {summonerId} 从 {existingCard.CurrentChampionId} → {championId}，仅更新头像");
+                            var newAvatar = await Globals.resLoading.GetChampionIconAsync(championId);
+                            FormUiStateManager.SafeInvoke(existingCard, () =>
+                            {
+                                existingCard.SetAvatarOnly(newAvatar);
+                                existingCard.CurrentChampionId = championId;
+                            });
+                        }
+                        col++;
+                        continue;
+                    }
+                    else
+                    {
+                        // 换人了，需要重建卡片
+                        //Debug.WriteLine($"[换人重建] Row={row}, Col={col}, 从 {oldSummonerId} → {summonerId}，重建卡片");
                     }
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[创建基础卡片] UI线程异常: {ex.Message}");
-                }
-            }));
-        }
 
-        /// <summary>
-        /// 创建基础卡片 - 记录玩家信息
-        /// </summary>
-        private void CreateSingleBasicCard(JToken player, int row, int col, bool isMyTeam)
-        {
-            try
-            {
-                long summonerId = player["summonerId"]?.Value<long>() ?? 0;
-                long obfuscatedId = player["obfuscatedSummonerId"]?.Value<long>() ?? 0;
-                int championId = player["championId"]?.Value<int>() ?? 0;
-                string gameName = player["gameName"]?.ToString() ?? "";
-                string visibility = player["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
+                // 创建新的"加载中"卡片
+                string championName = Globals.resLoading.GetChampionById(championId)?.Name ?? "Unknown";
+                Image avatar = await Globals.resLoading.GetChampionIconAsync(championId);
 
-                // 存储基础信息
-                _positionInfo[(row, col)] = new PlayerBasicInfo
+                var loadingInfo = new PlayerMatchInfo
                 {
-                    SummonerId = summonerId,
-                    ObfuscatedId = obfuscatedId,
-                    ChampionId = championId,
-                    GameName = gameName,
-                    Visibility = visibility,
-                    IsPlaceholder = false,
-                    LastUpdated = DateTime.Now
+                    Player = new PlayerInfo
+                    {
+                        SummonerId = summonerId,
+                        ChampionId = championId,
+                        ChampionName = championName,
+                        Avatar = avatar,
+                        GameName = "加载中...",
+                        SoloRank = "加载中...",
+                        FlexRank = "加载中...",
+                        IsPublic = "[查询中]"
+                    },
+                    MatchItems = new List<ListViewItem>(),
+                    HeroIcons = new ImageList()
                 };
 
-                // 记录已查询（对于非隐藏玩家）
-                if (summonerId > 0 || obfuscatedId > 0)
-                {
-                    long actualId = summonerId > 0 ? summonerId : obfuscatedId;
-                    _queriedPlayers.Add(actualId);
-                }
-
-                // 原有创建卡片逻辑...
-                UpdateCacheMappings(summonerId, championId, row, col);
-                string championName = Globals.resLoading.GetChampionById(championId)?.Name ?? "未知";
-                var avatar = LoadChampionAvatar(championId);
-                var loadingInfo = CreateLoadingPlayerInfo(summonerId, championId, championName, avatar, row);
-
-                // 如果是隐藏玩家
-                if (visibility == "HIDDEN" || summonerId == 0)
-                {
-                    loadingInfo.Player.GameName = "隐藏玩家";
-                    loadingInfo.Player.IsPublic = "隐藏";
-                    loadingInfo.Player.SoloRank = "隐藏";
-                    loadingInfo.Player.FlexRank = "隐藏";
-                }
-
-                CreateOrUpdateCard(loadingInfo, row, col, isMyTeam);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[创建单个卡片] 位置({row},{col})异常: {ex.Message}");
+                CreateLoadingPlayerMatch(loadingInfo, isMyTeam, row, col);
+                col++;
             }
         }
 
         /// <summary>
-        /// 更新缓存映射
-        /// </summary>
-        private void UpdateCacheMappings(long summonerId, int championId, int row, int col)
-        {
-            _currentChampBySummoner[summonerId] = championId;
-            _summonerToColMap[summonerId] = col;
-            playerCache[(row, col)] = (summonerId, championId);
-        }
-
-        /// <summary>
-        /// 创建加载中的玩家信息
-        /// </summary>
-        private PlayerMatchInfo CreateLoadingPlayerInfo(long summonerId, int championId,
-            string championName, Image avatar, int row)
-        {
-            return new PlayerMatchInfo
-            {
-                Player = new PlayerInfo
-                {
-                    SummonerId = summonerId,
-                    ChampionId = championId,
-                    ChampionName = championName,
-                    Avatar = avatar,
-                    GameName = "加载中...",
-                    SoloRank = "加载中...",
-                    FlexRank = "加载中...",
-                    IsPublic = "[查询中]",
-                    NameColor = GetTeamColor(row) // 使用队伍颜色
-                },
-                MatchItems = new List<ListViewItem>(),
-                HeroIcons = new ImageList()
-            };
-        }
-
-        #endregion
-
-        #region 2. 卡片UI操作
-
-        /// <summary>
-        /// 创建或更新卡片
-        /// </summary>
-        private void CreateOrUpdateCard(PlayerMatchInfo matchInfo, int row, int col, bool isMyTeam)
-        {
-            var existingPanel = _form.tableLayoutPanel1.GetControlFromPosition(col, row) as BorderPanel;
-
-            // 检查是否已有相同玩家的卡片
-            if (IsSamePlayerCard(existingPanel, matchInfo.Player.SummonerId))
-            {
-                UpdateExistingCard(existingPanel, matchInfo);
-            }
-            else
-            {
-                CreateNewCard(matchInfo, row, col, isMyTeam);
-            }
-        }
-
-        /// <summary>
-        /// 检查是否已有相同玩家的卡片
-        /// </summary>
-        private bool IsSamePlayerCard(BorderPanel? panel, long summonerId)
-        {
-            if (panel == null || panel.Controls.Count == 0) return false;
-
-            var existingCard = panel.Controls[0] as PlayerCardControl;
-            return existingCard != null && existingCard.CurrentSummonerId == summonerId;
-        }
-
-        /// <summary>
-        /// 更新现有卡片
-        /// </summary>
-        private void UpdateExistingCard(BorderPanel panel, PlayerMatchInfo matchInfo)
-        {
-            var card = panel.Controls[0] as PlayerCardControl;
-            if (card == null) return;
-
-            // 更新头像
-            if (card.CurrentChampionId != matchInfo.Player.ChampionId)
-            {
-                card.SetAvatarOnly(matchInfo.Player.Avatar);
-                card.CurrentChampionId = matchInfo.Player.ChampionId;
-            }
-        }
-
-        /// <summary>
-        /// 创建新卡片
-        /// </summary>
-        private void CreateNewCard(PlayerMatchInfo matchInfo, int row, int col, bool isMyTeam)
-        {
-            // 移除旧控件
-            RemoveOldControl(col, row);
-
-            // 创建卡片
-            var panel = CreateCardPanel(row);
-            var card = CreateCardControl(matchInfo, row);
-
-            panel.Controls.Add(card);
-            _form.tableLayoutPanel1.Controls.Add(panel, col, row);
-
-            // 缓存映射
-            _cardBySummonerId[matchInfo.Player.SummonerId] = card;
-        }
-
-        /// <summary>
-        /// 移除旧控件
-        /// </summary>
-        private void RemoveOldControl(int col, int row)
-        {
-            var oldControl = _form.tableLayoutPanel1.GetControlFromPosition(col, row);
-            if (oldControl != null)
-            {
-                _form.tableLayoutPanel1.Controls.Remove(oldControl);
-                oldControl.Dispose();
-            }
-        }
-
-        /// <summary>
-        /// 创建卡片面板
-        /// </summary>
-        private BorderPanel CreateCardPanel(int row)
-        {
-            return new BorderPanel
-            {
-                BorderColor = GetTeamColor(row),
-                BorderWidth = 1,
-                Padding = new Padding(2),
-                Dock = DockStyle.Fill,
-                Margin = new Padding(5)
-            };
-        }
-
-        /// <summary>
-        /// 创建卡片控件 - 修复：正确设置 HeroIcons
-        /// </summary>
-        private PlayerCardControl CreateCardControl(PlayerMatchInfo matchInfo, int row)
-        {
-            var card = new PlayerCardControl
-            {
-                Dock = DockStyle.Fill,
-                Margin = new Padding(0),
-                CurrentSummonerId = matchInfo.Player.SummonerId,
-                CurrentChampionId = matchInfo.Player.ChampionId
-            };
-
-            var player = matchInfo.Player;
-
-            // 【关键修复】设置 HeroIcons 到 ListViewControl
-            card.ListViewControl.SmallImageList = matchInfo.HeroIcons;
-            card.ListViewControl.View = View.Details;
-
-            card.SetPlayerInfo(
-                player.GameName,
-                player.SoloRank,
-                player.FlexRank,
-                player.Avatar,
-                player.IsPublic,
-                matchInfo.MatchItems,
-                player.NameColor,
-                player.SummonerId,
-                player.ChampionId
-            );
-
-            return card;
-        }
-
-        #endregion
-
-        #region 3. 数据填充
-
-        /// <summary>
-        /// 填充玩家战绩信息 - 修复：恢复组队检测逻辑
+        /// 填充玩家战绩信息
         /// </summary>
         public async Task FillPlayerMatchInfoAsync(JArray team, bool isMyTeam, int row)
         {
-            try
-            {
-                if (team == null || team.Count == 0) return;
-
-                //Debug.WriteLine($"[填充数据] 开始 - 行:{row}, 人数:{team.Count}");
-
-                // 使用信号量控制并发
-                var semaphore = new SemaphoreSlim(3);
-                var tasks = new List<Task<PlayerMatchInfo?>>();
-
-                foreach (var player in team)
+            //Debug.WriteLine($"[FillPlayerMatchInfoAsync] 开始异步战绩查询 {(isMyTeam ? "我方" : "敌方")}，行号: {row}");
+            var fetchedInfos = await RunWithLimitedConcurrency(
+                team,
+                async p =>
                 {
-                    if (player == null) continue;
+                    long sid = p["summonerId"]?.Value<long>() ?? 0;
+                    int cid = p["championId"]?.Value<int>() ?? 0;
+                    PlayerMatchInfo info;
 
-                    await semaphore.WaitAsync();
-
-                    tasks.Add(Task.Run(async () =>
+                    // 先检查缓存
+                    lock (_cachedPlayerMatchInfos)
                     {
-                        try
+                        if (_cachedPlayerMatchInfos.TryGetValue(sid, out info))
                         {
-                            return await ProcessSinglePlayer(player, row, isMyTeam);
-                        }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }));
-                }
-
-                var results = await Task.WhenAll(tasks);
-                var fetchedInfos = results.Where(info => info != null).ToList();
-
-                // 【关键修复】恢复组队关系检测和颜色更新
-                if (fetchedInfos.Count > 0)
-                {
-                    var detector = new PartyDetector();
-                    detector.Detect(fetchedInfos);  // 这会设置每个PlayerInfo的NameColor
-
-                    // ⚠️ 重要：更新UI中的名字颜色
-                    foreach (var info in fetchedInfos)
-                    {
-                        if (info?.Player == null) continue;
-                        UpdatePlayerNameColor(info.Player.SummonerId, info.Player.NameColor);
-                    }
-                }
-
-                // 防空白兜底
-                await CheckAndFillEmptyCards(team, row, isMyTeam);
-
-                //Debug.WriteLine($"[填充数据] 完成 - 行:{row}");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[填充数据] 异常: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 处理单个玩家
-        /// </summary>
-        private async Task<PlayerMatchInfo?> ProcessSinglePlayer(JToken player, int row, bool isMyTeam)
-        {
-            try
-            {
-                long sid = player["summonerId"]?.Value<long>() ?? 0;
-                int cid = player["championId"]?.Value<int>() ?? 0;
-
-                // 检查是否为隐藏玩家
-                string visibility = player["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
-                bool isHidden = visibility == "HIDDEN" || sid == 0;
-
-                // ⚠️ 修复：不再跳过隐藏玩家
-                // 对于隐藏玩家，直接返回一个占位信息
-                if (isHidden)
-                {
-                    return new PlayerMatchInfo
-                    {
-                        Player = new PlayerInfo
-                        {
-                            SummonerId = sid,
-                            ChampionId = cid,
-                            ChampionName = Globals.resLoading.GetChampionById(cid)?.Name ?? "未知",
-                            Avatar = LoadChampionAvatar(cid),  // ✅ 隐藏玩家的英雄头像正常显示
-                            GameName = "隐藏玩家",
-                            SoloRank = "隐藏",
-                            FlexRank = "隐藏",
-                            IsPublic = "隐藏",
-                            NameColor = GetTeamColor(row)
-                        },
-                        MatchItems = new List<ListViewItem>(),
-                        HeroIcons = new ImageList()
-                    };
-                }
-
-                // 非隐藏玩家：检查缓存
-                PlayerMatchInfo? info = CheckCache(sid, cid);
-                if (info != null) return info;
-
-                // 查询玩家信息
-                info = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(player);
-                if (info == null || info.Player == null)
-                {
-                    // 查询失败时返回失败信息
-                    return CreateFailedPlayerInfoWithRow(sid, cid, row);
-                }
-
-                // 更新缓存
-                UpdatePlayerCache(sid, info);
-
-                // 更新UI
-                await UpdatePlayerCardUI(sid, info, row, isMyTeam);
-
-                return info;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[处理单个玩家] 异常: {ex.Message}");
-                return CreateFailedPlayerInfoWithRow(0, 0, row);
-            }
-        }
-
-        /// <summary>
-        /// 检查缓存
-        /// </summary>
-        private PlayerMatchInfo? CheckCache(long sid, int cid)
-        {
-            lock (_cachedPlayerMatchInfos)
-            {
-                if (_cachedPlayerMatchInfos.TryGetValue(sid, out var cachedInfo) &&
-                    _currentChampBySummoner.TryGetValue(sid, out int current) && current == cid)
-                {
-                    return cachedInfo; // 缓存有效
-                }
-            }
-            return null;
-        }
-
-        /// <summary>
-        /// 更新玩家缓存
-        /// </summary>
-        private void UpdatePlayerCache(long sid, PlayerMatchInfo info)
-        {
-            lock (_cachedPlayerMatchInfos)
-            {
-                _cachedPlayerMatchInfos[sid] = info;
-            }
-        }
-
-        /// <summary>
-        /// 更新玩家卡片UI
-        /// </summary>
-        private async Task UpdatePlayerCardUI(long sid, PlayerMatchInfo info, int row, bool isMyTeam)
-        {
-            if (!_summonerToColMap.TryGetValue(sid, out int col)) return;
-
-            // 确认英雄没换
-            if (!_currentChampBySummoner.TryGetValue(sid, out int curCid) ||
-                curCid != info.Player.ChampionId)
-            {
-                Debug.WriteLine($"[跳过] sid={sid} 英雄已变更");
-                return;
-            }
-
-            // 更新卡片
-            await Task.Run(() => _form.Invoke(() =>
-            {
-                CreateLoadingPlayerMatch(info, isMyTeam, row, col);
-            }));
-        }
-
-        /// <summary>
-        /// 检查并填充缺失的卡片（重命名以避免冲突）
-        /// </summary>
-        private async Task CheckAndFillEmptyCards(JArray team, int row, bool isMyTeam)
-        {
-            for (int col = 0; col < team.Count; col++)
-            {
-                if (!playerCache.TryGetValue((row, col), out var cachedPlayer)) continue;
-
-                long sid = cachedPlayer.summonerId;
-                int cid = cachedPlayer.championId;
-
-                var ctrl = _form.tableLayoutPanel1.GetControlFromPosition(col, row);
-
-                if (ctrl == null || ctrl.Controls.Count == 0)
-                {
-                    Debug.WriteLine($"[防空白] 位置 ({row},{col}) 为空，补失败卡");
-                    var failCard = CreateFailedPlayerInfo(sid, cid);
-                    await Task.Run(() => _form.Invoke(() =>
-                    {
-                        CreateLoadingPlayerMatch(failCard, isMyTeam, row, col);
-                    }));
-                }
-            }
-        }
-
-        #endregion
-
-        #region 4. 卡片创建（供外部调用）
-
-        /// <summary>
-        /// 创建加载中的玩家卡片（供外部调用）- 修复：确保设置 HeroIcons
-        /// </summary>
-        public void CreateLoadingPlayerMatch(PlayerMatchInfo matchInfo, bool isMyTeam, int row, int column)
-        {
-            try
-            {
-                _form.Invoke(() =>
-                {
-                    var player = matchInfo.Player;
-
-                    // 检查是否已有卡片
-                    var existingPanel = _form.tableLayoutPanel1.GetControlFromPosition(column, row) as BorderPanel;
-                    if (existingPanel != null && existingPanel.Controls.Count > 0)
-                    {
-                        var existingCard = existingPanel.Controls[0] as PlayerCardControl;
-                        if (existingCard != null && existingCard.CurrentSummonerId == player.SummonerId)
-                        {
-                            // 更新现有卡片
-                            UpdateCardContent(existingCard, matchInfo);
-                            return;
+                            if (_currentChampBySummoner.TryGetValue(sid, out int current) && current == cid)
+                            {
+                                int col = _summonerToColMap.TryGetValue(sid, out int c) ? c : 0;
+                                var card = GetPlayerCardAtPosition(row, col);
+                                if (card != null && card.CurrentSummonerId == sid && !card.IsLoading)
+                                {
+                                    return info;
+                                }
+                                CreateLoadingPlayerMatch(info, isMyTeam, row, col);
+                            }
+                            return info;
                         }
                     }
 
-                    // 创建新卡片
-                    CreateNewPlayerCard(matchInfo, row, column, isMyTeam);
-                });
-            }
-            catch (Exception ex)
+                    // 非缓存命中，执行查询
+                    info = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(p);
+                    if (info == null)
+                    {
+                        Debug.WriteLine($"[跳过] summonerId={sid} 获取失败，info 为 null");
+                        var failedInfo = CreateFailedPlayerInfo(sid, cid);
+                        int col = _summonerToColMap.TryGetValue(sid, out int c2) ? c2 : 0;
+                        CreateLoadingPlayerMatch(failedInfo, isMyTeam, row, col);
+                        return null;
+                    }
+
+                    // 加入缓存
+                    lock (_cachedPlayerMatchInfos)
+                        _cachedPlayerMatchInfos[sid] = info;
+
+                    // 确保玩家仍是当前英雄
+                    if (_currentChampBySummoner.TryGetValue(sid, out int curCid) && curCid == cid)
+                    {
+                        int col = _summonerToColMap.TryGetValue(sid, out int c) ? c : 0;
+                        CreateLoadingPlayerMatch(info, isMyTeam, row, col);
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"[跳过战绩更新] summonerId={sid} 已更换英雄");
+                    }
+
+                    return info;
+                },
+                maxConcurrency: 3
+            );
+
+            // 分析组队关系
+            var detector = new PartyDetector();
+            detector.Detect(fetchedInfos.Where(f => f != null).ToList());
+
+            // 更新颜色
+            foreach (var info in fetchedInfos)
             {
-                Debug.WriteLine($"[CreateLoadingPlayerMatch] 异常: {ex.Message}");
+                if (info?.Player == null) continue;
+                UpdatePlayerNameColor(info.Player.SummonerId, info.Player.NameColor);
             }
         }
 
         /// <summary>
-        /// 更新卡片内容 - 修复：设置 HeroIcons
+        /// 创建加载中的玩家卡片
         /// </summary>
-        private void UpdateCardContent(PlayerCardControl card, PlayerMatchInfo matchInfo)
+        private void CreateLoadingPlayerMatch(PlayerMatchInfo matchInfo, bool isMyTeam, int row, int column)
         {
             var player = matchInfo.Player;
+            var heroIcons = matchInfo.HeroIcons;
+            var matchItems = matchInfo.MatchItems;
 
-            // 【关键修复】先设置 HeroIcons
-            card.ListViewControl.SmallImageList = matchInfo.HeroIcons;
-
-            card.SetPlayerInfo(
-                player.GameName,
-                player.SoloRank,
-                player.FlexRank,
-                player.Avatar,
-                player.IsPublic,
-                matchInfo.MatchItems,
-                player.NameColor,
-                player.SummonerId,
-                player.ChampionId
-            );
-        }
-
-        /// <summary>
-        /// 创建新玩家卡片 - 修复：设置 HeroIcons
-        /// </summary>
-        private void CreateNewPlayerCard(PlayerMatchInfo matchInfo, int row, int column, bool isMyTeam)
-        {
-            Color borderColor = GetTeamColor(row);
+            Color borderColor = row == 0 ? Color.Red :
+                                row == 1 ? Color.Blue : Color.Gray;
 
             var panel = new BorderPanel
             {
@@ -583,909 +214,328 @@ namespace League.Managers
             var card = new PlayerCardControl
             {
                 Dock = DockStyle.Fill,
-                Margin = new Padding(0),
-                CurrentSummonerId = matchInfo.Player.SummonerId,
-                CurrentChampionId = matchInfo.Player.ChampionId
+                Margin = new Padding(0)
             };
 
-            var player = matchInfo.Player;
+            // 注册映射
+            card.Tag = player.SummonerId;
+            _cardBySummonerId[matchInfo.Player.SummonerId] = card;
+
             string name = player.GameName ?? "未知";
             string soloRank = string.IsNullOrEmpty(player.SoloRank) ? "未知" : player.SoloRank;
             string flexRank = string.IsNullOrEmpty(player.FlexRank) ? "未知" : player.FlexRank;
+            Color nameColor = matchInfo.Player.NameColor;
 
-            // 【关键修复】先设置 HeroIcons
-            card.ListViewControl.SmallImageList = matchInfo.HeroIcons;
+            card.SetPlayerInfo(name, soloRank, flexRank, player.Avatar, player.IsPublic,
+                matchItems, nameColor, player.SummonerId, player.ChampionId);
+            card.ListViewControl.SmallImageList = heroIcons;
             card.ListViewControl.View = View.Details;
-
-            card.SetPlayerInfo(
-                name,
-                soloRank,
-                flexRank,
-                player.Avatar,
-                player.IsPublic,
-                matchInfo.MatchItems,
-                player.NameColor,
-                player.SummonerId,
-                player.ChampionId
-            );
 
             panel.Controls.Add(card);
 
-            // 添加到表格
-            var oldControl = _form.tableLayoutPanel1.GetControlFromPosition(column, row);
-            if (oldControl != null)
+            // 更新UI
+            FormUiStateManager.SafeInvoke(_form.tableLayoutPanel1, () =>
             {
-                _form.tableLayoutPanel1.Controls.Remove(oldControl);
-                oldControl.Dispose();
-            }
+                var oldControl = _form.tableLayoutPanel1.GetControlFromPosition(column, row);
+                if (oldControl != null)
+                {
+                    _form.tableLayoutPanel1.Controls.Remove(oldControl);
+                    oldControl.Dispose();
+                }
 
-            _form.tableLayoutPanel1.Controls.Add(panel, column, row);
-            _cardBySummonerId[matchInfo.Player.SummonerId] = card;
+                _form.tableLayoutPanel1.Controls.Add(panel, column, row);
+            });
         }
-
         #endregion
 
-        #region 5. 卡片丢失补全
+        #region 卡片数据校验与补全
         /// <summary>
-        /// 检查并补全缺失的卡片（增强版：支持精确位置跟踪）
+        /// 获取所有需要补全的卡片信息
         /// </summary>
-        public async Task CheckAndCompleteMissingCards(JArray fullSession, bool isMyTeamPhase = false,
-            bool isChampSelectPhase = false, int retryCount = 2)
+        public List<PlayerCardValidationInfo> GetCardsNeedCompletion()
         {
-            if (fullSession == null || fullSession.Count == 0)
+            var result = new List<PlayerCardValidationInfo>();
+
+            FormUiStateManager.SafeInvoke(_form.tableLayoutPanel1, () =>
             {
-                Debug.WriteLine("[补全检查] 完整session数据为空");
-                return;
-            }
-
-            // 保存完整数据供后续使用
-            _fullSessionData = fullSession;
-
-            try
-            {
-                // 阶段标识
-                string phaseName = isMyTeamPhase ? "选人阶段" : "游戏阶段";
-                phaseName += isChampSelectPhase ? "(选人)" : "(游戏)";
-
-                Debug.WriteLine($"[{phaseName}补全] 开始检查缺失卡片，有{fullSession.Count}名玩家数据");
-
-                // 记录开始时间
-                var startTime = DateTime.Now;
-
-                // 【重要】如果是选人阶段，需要额外延迟，确保基础卡片已创建
-                if (isChampSelectPhase)
+                for (int row = 0; row < _form.tableLayoutPanel1.RowCount; row++)
                 {
-                    await Task.Delay(800); // 等待基础卡片创建完成
-                }
-                else
-                {
-                    await Task.Delay(500); // 游戏阶段正常延迟
-                }
-
-                // 【关键改进】使用增强的位置查找方法
-                var missingPositions = FindMissingCardsWithPositionTracking(fullSession, isMyTeamPhase, isChampSelectPhase);
-
-                if (missingPositions.Count == 0)
-                {
-                    Debug.WriteLine($"[{phaseName}补全] 没有发现缺失的卡片");
-                    return;
-                }
-
-                Debug.WriteLine($"[{phaseName}补全] 发现 {missingPositions.Count} 个缺失位置");
-
-                // 打印每个缺失位置的详细信息
-                foreach (var (row, col, expectedSummonerId, foundSummonerId) in missingPositions)
-                {
-                    string teamName = row == 0 ? "我方" : "敌方";
-                    Debug.WriteLine($"[缺失详情] {teamName}位置({row},{col}): 预期sid={expectedSummonerId}, 实际sid={foundSummonerId}");
-                }
-
-                // 尝试从完整session中查找并补全
-                bool success = await FillMissingCardsWithPrecision(missingPositions, fullSession, isMyTeamPhase);
-
-                // 计算耗时
-                var elapsed = DateTime.Now - startTime;
-                Debug.WriteLine($"[{phaseName}补全] 补全完成，耗时{elapsed.TotalMilliseconds}ms，成功={success}");
-
-                // 如果失败且有重试次数，重试
-                if (!success && retryCount > 0)
-                {
-                    Debug.WriteLine($"[{phaseName}补全] 第一次补全失败，等待后重试（剩余重试次数：{retryCount}）");
-                    await Task.Delay(1500); // 增加等待时间
-
-                    // 重新检查缺失位置
-                    missingPositions = FindMissingCardsWithPositionTracking(fullSession, isMyTeamPhase, isChampSelectPhase);
-                    if (missingPositions.Count > 0)
+                    for (int col = 0; col < _form.tableLayoutPanel1.ColumnCount; col++)
                     {
-                        success = await FillMissingCardsWithPrecision(missingPositions, fullSession, isMyTeamPhase);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[补全检查] 异常: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 查找缺失卡片位置（增强版：支持隐藏玩家判断）
-        /// </summary>
-        private List<(int row, int col, long expectedSummonerId, long foundSummonerId)>
-            FindMissingCardsWithPositionTracking(JArray fullSession, bool isMyTeamPhase, bool isChampSelectPhase = false)
-        {
-            var missing = new List<(int row, int col, long expectedSummonerId, long foundSummonerId)>();
-
-            try
-            {
-                // 获取UI卡片信息
-                var uiCards = BuildUICardPositions();
-
-                // 建立预期位置映射
-                var expectedPositions = BuildExpectedPositionMap(fullSession, isMyTeamPhase);
-
-                // 检查每个预期位置
-                foreach (var position in expectedPositions)
-                {
-                    var (row, col) = position.Key;
-                    var player = position.Value;
-                    long expectedSid = player["summonerId"]?.Value<long>() ?? 0;
-                    int expectedChampionId = player["championId"]?.Value<int>() ?? 0;
-                    string visibility = player["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
-                    bool isHidden = visibility == "HIDDEN" || expectedSid == 0;
-
-                    // 检查UI中这个位置是否有卡片
-                    bool positionHasCard = uiCards.TryGetValue((row, col), out var cardInfo);
-                    long actualSid = positionHasCard ? cardInfo.SummonerId : -1;
-
-                    // 判断是否需要补全
-                    bool needToComplete = false;
-                    string reason = "";
-
-                    if (!positionHasCard)
-                    {
-                        // 位置完全为空
-                        needToComplete = true;
-                        reason = "位置完全为空";
-                    }
-                    else if (cardInfo.IsPlaceholder)
-                    {
-                        // 位置是占位卡片
-                        needToComplete = true;
-                        reason = "位置是占位卡片";
-                    }
-                    else if (isHidden)
-                    {
-                        // 预期是隐藏玩家，但当前位置不是隐藏玩家
-                        if (!cardInfo.IsHiddenPlayer)
+                        var panel = _form.tableLayoutPanel1.GetControlFromPosition(col, row) as BorderPanel;
+                        if (panel != null && panel.Controls.Count > 0)
                         {
-                            needToComplete = true;
-                            reason = "预期隐藏玩家但当前位置不是";
-                        }
-                        // 如果当前位置已经是隐藏玩家，检查英雄是否匹配
-                        else if (cardInfo.ChampionId > 0 && expectedChampionId > 0 &&
-                                 cardInfo.ChampionId != expectedChampionId)
-                        {
-                            needToComplete = true;
-                            reason = $"隐藏玩家英雄不匹配: 预期{expectedChampionId}, 实际{cardInfo.ChampionId}";
-                        }
-                    }
-                    else if (expectedSid > 0)
-                    {
-                        // 非隐藏玩家：检查ID是否匹配
-                        if (actualSid > 0 && expectedSid != actualSid)
-                        {
-                            // 检查这个玩家是否在其他位置
-                            bool playerExistsElsewhere = uiCards.Any(kvp =>
-                                kvp.Value.SummonerId == expectedSid && kvp.Key != (row, col));
-
-                            if (playerExistsElsewhere)
+                            var card = panel.Controls[0] as PlayerCardControl;
+                            if (card != null && !card.IsDisposed)
                             {
-                                // 玩家在其他位置，说明只是位置调换
-                                Debug.WriteLine($"[位置调换] 玩家{expectedSid}在位置({row},{col})被调换");
-                            }
-                            else
-                            {
-                                needToComplete = true;
-                                reason = $"玩家ID不匹配: 预期{expectedSid}, 实际{actualSid}";
-                            }
-                        }
-                        else if (actualSid <= 0 && !cardInfo.IsHiddenPlayer)
-                        {
-                            // 位置不是隐藏玩家，但预期有玩家
-                            needToComplete = true;
-                            reason = $"预期有玩家{expectedSid}但位置不是隐藏玩家";
-                        }
-                    }
+                                // 检查卡片是否需要补全
+                                bool needsCompletion = CheckCardNeedsCompletion(card);
 
-                    if (needToComplete)
-                    {
-                        missing.Add((row, col, expectedSid, actualSid));
-                        Debug.WriteLine($"[缺失检测] 位置({row},{col}): {reason}");
-                    }
-                }
-
-                // 【新增】检查是否有隐藏玩家被遗漏
-                CheckHiddenPlayersMissing(fullSession, uiCards, missing);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[缺失检测] 异常: {ex.Message}");
-            }
-
-            return missing;
-        }
-
-        /// <summary>
-        /// 检查隐藏玩家是否被遗漏
-        /// </summary>
-        private void CheckHiddenPlayersMissing(JArray fullSession, Dictionary<(int row, int col), UICardInfo> uiCards,
-            List<(int row, int col, long expectedSummonerId, long foundSummonerId)> missing)
-        {
-            try
-            {
-                // 统计预期中的隐藏玩家
-                var expectedHiddenPlayers = new List<(int row, int col, int championId)>();
-
-                foreach (var player in fullSession)
-                {
-                    long sid = player["summonerId"]?.Value<long>() ?? 0;
-                    int championId = player["championId"]?.Value<int>() ?? 0;
-                    string visibility = player["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
-                    bool isHidden = visibility == "HIDDEN" || sid == 0;
-
-                    if (isHidden && championId > 0)
-                    {
-                        int team = player["team"]?.Value<int>() ?? -1;
-                        int cellId = player["cellId"]?.Value<int>() ?? -1;
-
-                        if (team != -1 && cellId != -1)
-                        {
-                            int row = team == 1 ? 0 : 1;
-                            int col = cellId % 5;
-
-                            expectedHiddenPlayers.Add((row, col, championId));
-                            Debug.WriteLine($"[隐藏玩家] 预期位置({row},{col})有隐藏玩家，英雄{championId}");
-                        }
-                    }
-                }
-
-                // 检查每个预期隐藏玩家的位置
-                foreach (var (row, col, championId) in expectedHiddenPlayers)
-                {
-                    if (uiCards.TryGetValue((row, col), out var cardInfo))
-                    {
-                        if (cardInfo.IsHiddenPlayer)
-                        {
-                            // 已经是隐藏玩家，检查英雄是否匹配
-                            if (cardInfo.ChampionId > 0 && championId > 0 &&
-                                cardInfo.ChampionId != championId)
-                            {
-                                missing.Add((row, col, 0, cardInfo.SummonerId));
-                                Debug.WriteLine($"[隐藏英雄不匹配] 位置({row},{col}): 预期英雄{championId}, 实际英雄{cardInfo.ChampionId}");
-                            }
-                        }
-                        else
-                        {
-                            // 位置不是隐藏玩家
-                            missing.Add((row, col, 0, cardInfo.SummonerId));
-                            Debug.WriteLine($"[隐藏玩家缺失] 位置({row},{col})应该有隐藏玩家但实际不是");
-                        }
-                    }
-                    else
-                    {
-                        // 位置完全为空
-                        missing.Add((row, col, 0, -1));
-                        Debug.WriteLine($"[隐藏玩家缺失] 位置({row},{col})应该有隐藏玩家但位置为空");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[检查隐藏玩家] 异常: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 建立当前UI中所有卡片的详细信息
-        /// </summary>
-        private Dictionary<(int row, int col), UICardInfo> BuildUICardPositions()
-        {
-            var uiCards = new Dictionary<(int row, int col), UICardInfo>();
-
-            for (int row = 0; row < 2; row++)
-            {
-                for (int col = 0; col < 5; col++)
-                {
-                    var control = _form.tableLayoutPanel1.GetControlFromPosition(col, row);
-                    var cardInfo = new UICardInfo();
-
-                    if (control is BorderPanel borderPanel && borderPanel.Controls.Count > 0)
-                    {
-                        var card = borderPanel.Controls[0] as PlayerCardControl;
-                        if (card != null && !card.IsDisposed)
-                        {
-                            cardInfo.SummonerId = card.CurrentSummonerId;
-                            cardInfo.ChampionId = card.CurrentChampionId;
-                            cardInfo.DisplayName = card.lblPlayerName.Text;
-                            cardInfo.IsHiddenPlayer = cardInfo.DisplayName == "隐藏玩家" ||
-                                                     cardInfo.DisplayName == "玩家未找到" ||
-                                                     cardInfo.DisplayName == "查询失败";
-                            cardInfo.IsPlaceholder = cardInfo.DisplayName == "玩家未找到" ||
-                                                    cardInfo.DisplayName == "查询失败" ||
-                                                    cardInfo.SummonerId < 0;
-
-                            // 获取英雄名称
-                            if (cardInfo.ChampionId > 0)
-                            {
-                                cardInfo.ChampionName = Globals.resLoading.GetChampionById(cardInfo.ChampionId)?.Name ?? "未知";
-                            }
-
-                            uiCards[(row, col)] = cardInfo;
-
-                            Debug.WriteLine($"[UI信息] 位置({row},{col}): sid={cardInfo.SummonerId}, " +
-                                           $"champ={cardInfo.ChampionId}({cardInfo.ChampionName}), " +
-                                           $"name='{cardInfo.DisplayName}', " +
-                                           $"hidden={cardInfo.IsHiddenPlayer}, placeholder={cardInfo.IsPlaceholder}");
-                        }
-                    }
-                }
-            }
-
-            Debug.WriteLine($"[UI信息] 共找到{uiCards.Count}个卡片信息");
-            return uiCards;
-        }
-
-        /// <summary>
-        /// UI卡片信息类
-        /// </summary>
-        private class UICardInfo
-        {
-            public long SummonerId { get; set; }
-            public int ChampionId { get; set; }
-            public string ChampionName { get; set; }
-            public string DisplayName { get; set; }
-            public bool IsHiddenPlayer { get; set; }
-            public bool IsPlaceholder { get; set; }
-        }
-
-        /// <summary>
-        /// 建立预期位置映射（最终版：支持隐藏玩家和智能匹配）
-        /// </summary>
-        private Dictionary<(int row, int col), JToken> BuildExpectedPositionMap(JArray fullSession, bool isMyTeamPhase)
-        {
-            var positionMap = new Dictionary<(int row, int col), JToken>();
-
-            try
-            {
-                // 第一步：按队伍和cellId进行基础映射
-                foreach (var player in fullSession)
-                {
-                    int team = player["team"]?.Value<int>() ?? -1;
-                    int cellId = player["cellId"]?.Value<int>() ?? -1;
-                    long sid = player["summonerId"]?.Value<long>() ?? 0;
-
-                    if (team == -1) continue;
-
-                    int row = team == 1 ? 0 : 1;
-                    int col = cellId % 5;
-
-                    // 对于选人阶段且是MyTeam阶段，只处理我方
-                    if (isMyTeamPhase && row != 0) continue;
-
-                    positionMap[(row, col)] = player;
-                    Debug.WriteLine($"[基础映射] 位置({row},{col}) <- sid={sid}, cellId={cellId}");
-                }
-
-                // 第二步：如果有位置冲突，进行智能调整
-                AdjustPositionConflicts(positionMap, fullSession, isMyTeamPhase);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[建立映射] 异常: {ex.Message}");
-            }
-
-            return positionMap;
-        }
-
-        /// <summary>
-        /// 调整位置冲突
-        /// </summary>
-        private void AdjustPositionConflicts(Dictionary<(int row, int col), JToken> positionMap,
-            JArray fullSession, bool isMyTeamPhase)
-        {
-            try
-            {
-                // 检查是否有重复的玩家被映射到多个位置
-                var playerPositions = new Dictionary<long, List<(int row, int col)>>();
-
-                foreach (var kvp in positionMap)
-                {
-                    var player = kvp.Value;
-                    long sid = player["summonerId"]?.Value<long>() ?? 0;
-
-                    if (sid > 0)
-                    {
-                        if (!playerPositions.ContainsKey(sid))
-                            playerPositions[sid] = new List<(int row, int col)>();
-
-                        playerPositions[sid].Add(kvp.Key);
-                    }
-                }
-
-                // 处理有冲突的玩家
-                foreach (var kvp in playerPositions)
-                {
-                    if (kvp.Value.Count > 1)
-                    {
-                        Debug.WriteLine($"[位置冲突] 玩家{kvp.Key}被映射到{string.Join(",", kvp.Value)}");
-
-                        // 保留第一个位置，其他位置重新分配
-                        var firstPosition = kvp.Value[0];
-                        for (int i = 1; i < kvp.Value.Count; i++)
-                        {
-                            var conflictPosition = kvp.Value[i];
-                            positionMap.Remove(conflictPosition);
-                            Debug.WriteLine($"[冲突解决] 移除冲突位置{conflictPosition}");
-                        }
-                    }
-                }
-
-                // 重新填充被移除的位置
-                var emptyPositions = GetEmptyPositions(positionMap, isMyTeamPhase);
-                var unassignedPlayers = GetUnassignedPlayers(fullSession, positionMap);
-
-                // 智能分配未分配的玩家到空位置
-                foreach (var position in emptyPositions)
-                {
-                    if (unassignedPlayers.Count == 0) break;
-
-                    var player = unassignedPlayers[0];
-                    positionMap[position] = player;
-                    unassignedPlayers.RemoveAt(0);
-
-                    long sid = player["summonerId"]?.Value<long>() ?? 0;
-                    Debug.WriteLine($"[智能分配] 位置{position} <- 玩家{sid}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[调整冲突] 异常: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 获取空位置
-        /// </summary>
-        private List<(int row, int col)> GetEmptyPositions(Dictionary<(int row, int col), JToken> positionMap, bool isMyTeamPhase)
-        {
-            var emptyPositions = new List<(int row, int col)>();
-
-            int maxRow = isMyTeamPhase ? 0 : 1; // 如果是选人阶段只检查我方
-
-            for (int row = 0; row <= maxRow; row++)
-            {
-                for (int col = 0; col < 5; col++)
-                {
-                    if (!positionMap.ContainsKey((row, col)))
-                    {
-                        emptyPositions.Add((row, col));
-                    }
-                }
-            }
-
-            return emptyPositions;
-        }
-
-        /// <summary>
-        /// 获取未分配的玩家
-        /// </summary>
-        private List<JToken> GetUnassignedPlayers(JArray fullSession, Dictionary<(int row, int col), JToken> positionMap)
-        {
-            var assignedPlayerIds = new HashSet<long>();
-
-            foreach (var player in positionMap.Values)
-            {
-                long sid = player["summonerId"]?.Value<long>() ?? 0;
-                if (sid > 0) assignedPlayerIds.Add(sid);
-            }
-
-            return fullSession
-                .Where(p =>
-                {
-                    long sid = p["summonerId"]?.Value<long>() ?? 0;
-                    return sid > 0 && !assignedPlayerIds.Contains(sid);
-                })
-                .ToList();
-        }
-
-        /// <summary>
-        /// 精准补全缺失卡片（改进版：只补全真正缺失的）
-        /// </summary>
-        private async Task<bool> FillMissingCardsWithPrecision(
-            List<(int row, int col, long expectedSummonerId, long foundSummonerId)> missingPositions,
-            JArray fullSession,
-            bool isMyTeamPhase)
-        {
-            if (missingPositions.Count == 0) return true;
-
-            bool allSuccess = true;
-            int successCount = 0;
-            int skippedCount = 0;
-
-            Debug.WriteLine($"[精准补全] 开始处理{missingPositions.Count}个可能缺失的位置");
-
-            foreach (var (row, col, expectedSid, foundSid) in missingPositions)
-            {
-                try
-                {
-                    string teamName = row == 0 ? "我方" : "敌方";
-
-                    // 检查这个玩家是否已经在UI中的其他位置
-                    bool playerAlreadyInUI = IsPlayerAlreadyInUI(expectedSid, (row, col));
-
-                    if (playerAlreadyInUI && foundSid > 0)
-                    {
-                        // 玩家已经在UI中，只是位置不对，跳过补全
-                        Debug.WriteLine($"[跳过调换] {teamName}位置({row},{col})的玩家{expectedSid}已在其他位置");
-                        skippedCount++;
-                        continue;
-                    }
-
-                    if (foundSid == -1) // 位置完全为空
-                    {
-                        Debug.WriteLine($"[补全处理] {teamName}位置({row},{col})完全为空，需要补全玩家{expectedSid}");
-                    }
-                    else
-                    {
-                        Debug.WriteLine($"[补全处理] {teamName}位置({row},{col})玩家{expectedSid}完全缺失");
-                    }
-
-                    // 精确查找玩家
-                    JToken player = FindPlayerByPositionAndId(row, col, expectedSid, fullSession);
-
-                    if (player == null)
-                    {
-                        Debug.WriteLine($"[补全失败] 位置({row},{col})找不到对应玩家");
-                        allSuccess = false;
-
-                        // 只有在位置完全为空时才创建占位卡片
-                        if (foundSid == -1)
-                        {
-                            await CreatePlaceholderCard(row, col, row == 0);
-                        }
-                        continue;
-                    }
-
-                    long actualSid = player["summonerId"]?.Value<long>() ?? 0;
-                    int championId = player["championId"]?.Value<int>() ?? 0;
-
-                    Debug.WriteLine($"[补全找到] 位置({row},{col}): sid={actualSid}, champ={championId}");
-
-                    // 只在位置完全为空时才创建基础卡片
-                    if (foundSid == -1)
-                    {
-                        await Task.Run(() => _form.Invoke(() =>
-                        {
-                            CreateSingleBasicCard(player, row, col, row == 0);
-                        }));
-                        successCount++;
-                    }
-
-                    // 如果是非隐藏玩家，异步查询详细信息
-                    string visibility = player["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
-                    if (visibility != "HIDDEN" && actualSid > 0)
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                await Task.Delay(1000);
-                                var info = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(player);
-                                if (info != null && info.Player != null)
+                                if (needsCompletion)
                                 {
-                                    await Task.Run(() => _form.Invoke(() =>
+                                    result.Add(new PlayerCardValidationInfo
                                     {
-                                        CreateLoadingPlayerMatch(info, row == 0, row, col);
-                                    }));
+                                        SummonerId = card.CurrentSummonerId,
+                                        ChampionId = card.CurrentChampionId,
+                                        Row = row,
+                                        Column = col,
+                                        Card = card,
+                                        CurrentName = card.lblPlayerName.Text,
+                                        CurrentSoloRank = card.lblSoloRank.Text,
+                                        CurrentFlexRank = card.lblFlexRank.Text,
+                                        HasAvatar = card.picHero.Image != null
+                                    });
                                 }
                             }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine($"[补全查询] 位置({row},{col})查询异常: {ex.Message}");
-                            }
-                        });
+                        }
                     }
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[补全单个] 位置({row},{col})异常: {ex.Message}");
-                    allSuccess = false;
-                }
-            }
+            });
 
-            Debug.WriteLine($"[精准补全] 完成: 成功{successCount}个，跳过{skippedCount}个，共{missingPositions.Count}个位置");
-            return allSuccess;
+            Debug.WriteLine($"[GetCardsNeedCompletion] 找到 {result.Count} 张需要补全的卡片");
+            return result;
         }
 
         /// <summary>
-        /// 检查玩家是否已经在UI中的其他位置（简化版）
+        /// 检查单个卡片是否需要补全
         /// </summary>
-        private bool IsPlayerAlreadyInUI(long summonerId, (int row, int col) excludePosition)
+        private bool CheckCardNeedsCompletion(PlayerCardControl card)
         {
-            var uiCards = BuildUICardPositions();
-            return IsPlayerAlreadyInUI(summonerId, 0, false, excludePosition, uiCards);
-        }
+            if (card == null || card.IsDisposed) return true;
 
-        /// <summary>
-        /// 检查玩家是否已经在UI中的其他位置（完整版）
-        /// </summary>
-        private bool IsPlayerAlreadyInUI(long summonerId, int championId, bool isHidden,
-            (int row, int col) excludePosition, Dictionary<(int row, int col), UICardInfo> uiCards)
-        {
-            foreach (var kvp in uiCards)
+            string playerName = card.lblPlayerName.Text;
+            string soloRank = card.lblSoloRank.Text;
+            string flexRank = card.lblFlexRank.Text;
+            bool hasAvatar = card.picHero.Image != null;
+
+            // 检查是否为查询失败
+            if (playerName == "查询失败" || playerName == "失败")
             {
-                var position = kvp.Key;
-                var cardInfo = kvp.Value;
-
-                if (position.row == excludePosition.row && position.col == excludePosition.col)
-                    continue;
-
-                if (isHidden)
-                {
-                    // 对于隐藏玩家，通过英雄ID判断
-                    if (cardInfo.IsHiddenPlayer && championId > 0 && cardInfo.ChampionId == championId)
-                    {
-                        return true;
-                    }
-                }
-                else if (summonerId > 0)
-                {
-                    // 对于非隐藏玩家，通过summonerId判断
-                    if (cardInfo.SummonerId == summonerId)
-                    {
-                        return true;
-                    }
-                }
+                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 查询失败");
+                return true;
             }
+
+            // 检查是否为查询中
+            if (playerName == "加载中..." || playerName.Contains("查询中"))
+            {
+                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 查询中");
+                return true;
+            }
+
+            // 检查是否缺少头像
+            if (!hasAvatar)
+            {
+                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 缺少头像");
+                return true;
+            }
+
+            // 检查段位信息
+            if (soloRank == "失败" || soloRank == "加载中..." ||
+                flexRank == "失败" || flexRank == "加载中...")
+            {
+                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 段位信息异常");
+                return true;
+            }
+
+            // 检查是否缺少战绩数据
+            if (card.ListViewControl.Items.Count == 0 &&
+                playerName != "隐藏玩家" && playerName != "隐藏")
+            {
+                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 缺少战绩数据");
+                return true;
+            }
+
             return false;
         }
 
         /// <summary>
-        /// 根据位置和ID精确查找玩家
+        /// 重新获取并更新指定玩家的卡片数据
         /// </summary>
-        private JToken FindPlayerByPositionAndId(int row, int col, long expectedSid, JArray fullSession)
-        {
-            if (fullSession == null) return null;
-
-            // 策略1：如果有expectedSid，优先按ID查找
-            if (expectedSid > 0)
-            {
-                var playerById = fullSession.FirstOrDefault(p =>
-                    p["summonerId"]?.Value<long>() == expectedSid);
-
-                if (playerById != null)
-                {
-                    Debug.WriteLine($"[精确查找] 通过ID找到玩家: sid={expectedSid}");
-                    return playerById;
-                }
-            }
-
-            // 策略2：按位置查找
-            int expectedTeam = row == 0 ? 1 : 2; // 行0对应team 1，行1对应team 2
-
-            var teamPlayers = fullSession
-                .Where(p => p["team"]?.Value<int>() == expectedTeam)
-                .ToList();
-
-            if (col < teamPlayers.Count)
-            {
-                var playerByPosition = teamPlayers[col];
-                Debug.WriteLine($"[精确查找] 通过位置找到玩家: 队伍{expectedTeam}第{col}个");
-                return playerByPosition;
-            }
-
-            // 策略3：返回第一个匹配队伍的玩家
-            return teamPlayers.FirstOrDefault();
-        }
-
-        /// <summary>
-        /// 创建占位卡片（当找不到玩家时）
-        /// </summary>
-        private async Task CreatePlaceholderCard(int row, int col, bool isMyTeam)
+        public async Task<bool> RetryAndUpdatePlayerCard(PlayerCardValidationInfo cardInfo, JToken playerData)
         {
             try
             {
-                // 创建一个特殊ID，避免冲突
-                long placeholderId = -1000 - (row * 100 + col * 10);
-
-                Debug.WriteLine($"[创建占位] 位置({row},{col})创建占位卡片，ID={placeholderId}");
-
-                // 更新缓存映射
-                UpdateCacheMappings(placeholderId, 0, row, col);
-
-                // 创建占位信息
-                var placeholderInfo = new PlayerMatchInfo
+                if (cardInfo.Card == null || cardInfo.Card.IsDisposed || playerData == null)
                 {
-                    Player = new PlayerInfo
+                    return false;
+                }
+
+                // 重新查询战绩信息
+                var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData);
+                if (matchInfo == null || matchInfo.Player == null)
+                {
+                    Debug.WriteLine($"[重试更新] summonerId={cardInfo.SummonerId} 获取战绩信息失败");
+                    return false;
+                }
+
+                // 避免重复创建，检查卡片是否已被更新
+                FormUiStateManager.SafeInvoke(cardInfo.Card, () =>
+                {
+                    if (cardInfo.Card.IsDisposed) return;
+
+                    // 检查卡片状态是否已改变（可能已被其他线程更新）
+                    bool stillNeedsUpdate = CheckCardNeedsCompletion(cardInfo.Card);
+                    if (!stillNeedsUpdate)
                     {
-                        SummonerId = placeholderId,
-                        ChampionId = 0,
-                        ChampionName = "位置空",
-                        Avatar = LoadDefaultAvatar(),
-                        GameName = "玩家未找到",
-                        SoloRank = "---",
-                        FlexRank = "---",
-                        IsPublic = "[未知]",
-                        NameColor = GetTeamColor(row)
-                    },
-                    MatchItems = new List<ListViewItem>(),
-                    HeroIcons = new ImageList()
-                };
+                        Debug.WriteLine($"[重试更新] summonerId={cardInfo.SummonerId} 卡片已更新，跳过");
+                        return;
+                    }
 
-                // 创建卡片
-                await Task.Run(() => _form.Invoke(() =>
-                {
-                    CreateLoadingPlayerMatch(placeholderInfo, isMyTeam, row, col);
-                }));
+                    // 更新卡片信息
+                    var player = matchInfo.Player;
+
+                    // 更新头像（避免重复设置相同的图片）
+                    if (player.Avatar != null && cardInfo.Card.picHero.Image != player.Avatar)
+                    {
+                        cardInfo.Card.picHero.Image?.Dispose();
+                        cardInfo.Card.picHero.Image = player.Avatar;
+                    }
+
+                    // 更新文本信息
+                    if (cardInfo.Card.lblPlayerName.Text != player.GameName)
+                    {
+                        cardInfo.Card.lblPlayerName.Text = player.GameName ?? "未知玩家";
+                    }
+
+                    if (cardInfo.Card.lblSoloRank.Text != player.SoloRank)
+                    {
+                        cardInfo.Card.lblSoloRank.Text = player.SoloRank ?? "未知";
+                    }
+
+                    if (cardInfo.Card.lblFlexRank.Text != player.FlexRank)
+                    {
+                        cardInfo.Card.lblFlexRank.Text = player.FlexRank ?? "未知";
+                    }
+
+                    if (cardInfo.Card.lblPrivacyStatus.Text != player.IsPublic)
+                    {
+                        cardInfo.Card.lblPrivacyStatus.Text = player.IsPublic ?? "隐藏";
+                    }
+
+                    // 更新战绩列表
+                    if (matchInfo.MatchItems != null && matchInfo.MatchItems.Any())
+                    {
+                        cardInfo.Card.ListViewControl.Items.Clear();
+                        foreach (var item in matchInfo.MatchItems)
+                        {
+                            cardInfo.Card.ListViewControl.Items.Add(item);
+                        }
+
+                        if (matchInfo.HeroIcons != null)
+                        {
+                            cardInfo.Card.ListViewControl.SmallImageList = matchInfo.HeroIcons;
+                        }
+                    }
+
+                    // 更新名字颜色
+                    if (player.NameColor != default(Color))
+                    {
+                        cardInfo.Card.lblPlayerName.LinkColor = player.NameColor;
+                        cardInfo.Card.lblPlayerName.VisitedLinkColor = player.NameColor;
+                        cardInfo.Card.lblPlayerName.ActiveLinkColor = player.NameColor;
+                    }
+
+                    Debug.WriteLine($"[重试更新] summonerId={cardInfo.SummonerId} 卡片更新成功");
+                });
+
+                return true;
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[创建占位卡片] 异常: {ex.Message}");
+                Debug.WriteLine($"[重试更新异常] summonerId={cardInfo.SummonerId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 从Session数据中查找玩家数据
+        /// </summary>
+        public JToken FindPlayerDataInSession(JArray teamOne, JArray teamTwo, long summonerId)
+        {
+            if (teamOne == null || teamTwo == null) return null;
+
+            // 在teamOne中查找
+            var player = teamOne.FirstOrDefault(p =>
+                p["summonerId"]?.Value<long>() == summonerId);
+
+            if (player == null)
+            {
+                // 在teamTwo中查找
+                player = teamTwo.FirstOrDefault(p =>
+                    p["summonerId"]?.Value<long>() == summonerId);
+            }
+
+            return player;
+        }
+
+        /// <summary>
+        /// 批量校验并补全所有卡片
+        /// </summary>
+        public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
+        {
+            if (teamOne == null || teamTwo == null) return;
+
+            try
+            {
+                Debug.WriteLine("[批量校验] 开始批量校验并补全卡片");
+
+                // 获取所有需要补全的卡片
+                var cardsNeedCompletion = GetCardsNeedCompletion();
+                if (cardsNeedCompletion.Count == 0)
+                {
+                    Debug.WriteLine("[批量校验] 没有需要补全的卡片");
+                    return;
+                }
+
+                Debug.WriteLine($"[批量校验] 需要补全 {cardsNeedCompletion.Count} 张卡片");
+
+                // 分批处理，避免并发过高
+                const int batchSize = 3;
+                var batches = cardsNeedCompletion.Select((card, index) => new { card, index })
+                    .GroupBy(x => x.index / batchSize)
+                    .Select(g => g.Select(x => x.card).ToList())
+                    .ToList();
+
+                foreach (var batch in batches)
+                {
+                    var tasks = new List<Task<bool>>();
+
+                    foreach (var cardInfo in batch)
+                    {
+                        // 查找玩家数据
+                        var playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
+                        if (playerData == null)
+                        {
+                            Debug.WriteLine($"[批量校验] 未找到summonerId={cardInfo.SummonerId}的玩家数据");
+                            continue;
+                        }
+
+                        // 异步处理每个卡片
+                        tasks.Add(RetryAndUpdatePlayerCard(cardInfo, playerData));
+                    }
+
+                    // 等待批次完成
+                    var results = await Task.WhenAll(tasks);
+                    var successCount = results.Count(r => r);
+
+                    Debug.WriteLine($"[批量校验] 批次处理完成，成功: {successCount}/{tasks.Count}");
+
+                    // 批次间延迟，避免服务器压力
+                    await Task.Delay(500);
+                }
+
+                Debug.WriteLine("[批量校验] 批量校验完成");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[批量校验异常]: {ex.Message}");
             }
         }
         #endregion
 
-        #region 6. 辅助方法
-
+        #region 缓存管理
         /// <summary>
-        /// 加载英雄头像
-        /// </summary>
-        private Image LoadChampionAvatar(int championId)
-        {
-            if (championId <= 0) return LoadDefaultAvatar();
-
-            if (_championAvatarCache.TryGetValue(championId, out var cachedImage))
-            {
-                return cachedImage;
-            }
-
-            try
-            {
-                var image = Globals.resLoading.GetChampionIconAsync(championId).GetAwaiter().GetResult();
-                if (image != null)
-                {
-                    // 确保创建副本，因为Image不能跨线程共享
-                    var clonedImage = new Bitmap(image);
-                    _championAvatarCache[championId] = clonedImage;
-                    return clonedImage;
-                }
-            }
-            catch { }
-
-            return LoadDefaultAvatar();
-        }
-
-        /// <summary>
-        /// 加载默认头像
-        /// </summary>
-        private Image LoadDefaultAvatar()
-        {
-            if (_defaultAvatar != null) return _defaultAvatar;
-
-            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "Defaults", "Profile.png");
-            if (File.Exists(path))
-            {
-                using (var tempImage = Image.FromFile(path))
-                {
-                    _defaultAvatar = new Bitmap(tempImage);
-                }
-            }
-            else
-            {
-                _defaultAvatar = new Bitmap(64, 64);
-            }
-
-            return _defaultAvatar;
-        }
-
-        // 清理方法
-        public void ClearImageCache()
-        {
-            foreach (var image in _championAvatarCache.Values)
-            {
-                image.Dispose();
-            }
-            _championAvatarCache.Clear();
-
-            _defaultAvatar?.Dispose();
-            _defaultAvatar = null;
-        }
-
-        /// <summary>
-        /// 获取队伍颜色
-        /// </summary>
-        private Color GetTeamColor(int row)
-        {
-            // 注意：这里应该和 PartyDetector 中的颜色逻辑一致
-            // PartyDetector 检测组队后会设置不同的颜色
-            // 如果没有组队，使用默认的队伍颜色
-            return row == 0 ? Color.Red : row == 1 ? Color.Blue : Color.Gray;
-        }
-
-        /// <summary>
-        /// 更新玩家名字颜色
-        /// </summary>
-        private void UpdatePlayerNameColor(long summonerId, Color color)
-        {
-            if (_cardBySummonerId.TryGetValue(summonerId, out var card))
-            {
-                FormUiStateManager.SafeInvoke(card, () =>
-                {
-                    if (card.IsDisposed) return;
-
-                    // 更新LinkLabel的颜色
-                    card.lblPlayerName.LinkColor = color;
-                    card.lblPlayerName.VisitedLinkColor = color;
-                    card.lblPlayerName.ActiveLinkColor = color;
-                });
-            }
-            else
-            {
-                Debug.WriteLine($"[更新颜色] 未找到卡片: summonerId={summonerId}");
-            }
-        }
-
-        /// <summary>
-        /// 创建失败时的玩家信息（原始版本）
-        /// </summary>
-        public PlayerMatchInfo CreateFailedPlayerInfo(long summonerId, int championId)
-        {
-            return new PlayerMatchInfo
-            {
-                Player = new PlayerInfo
-                {
-                    SummonerId = summonerId,
-                    ChampionId = championId,
-                    ChampionName = "查询失败",
-                    GameName = "失败",
-                    IsPublic = "[失败]",
-                    SoloRank = "失败",
-                    FlexRank = "失败",
-                    Avatar = LoadDefaultAvatar(),
-                    NameColor = Color.Black // 失败时使用黑色
-                },
-                MatchItems = new List<ListViewItem>(),
-                HeroIcons = new ImageList()
-            };
-        }
-
-        /// <summary>
-        /// 创建失败时的玩家信息（带row参数版本）
-        /// </summary>
-        public PlayerMatchInfo CreateFailedPlayerInfoWithRow(long summonerId, int championId, int row)
-        {
-            return new PlayerMatchInfo
-            {
-                Player = new PlayerInfo
-                {
-                    SummonerId = summonerId,
-                    ChampionId = championId,
-                    ChampionName = championId > 0 ?
-                        Globals.resLoading.GetChampionById(championId)?.Name ?? "未知" : "查询失败",
-                    Avatar = LoadChampionAvatar(championId),
-                    GameName = "查询失败",
-                    IsPublic = "[失败]",
-                    SoloRank = "失败",
-                    FlexRank = "失败",
-                    NameColor = GetTeamColor(row)
-                },
-                MatchItems = new List<ListViewItem>(),
-                HeroIcons = new ImageList()
-            };
-        }
-
-        /// <summary>
-        /// 获取缓存中的玩家信息
+        /// 供 FormMain 热键发送战绩时使用，安全获取缓存中的玩家战绩信息
         /// </summary>
         public bool TryGetCachedPlayerInfo(long summonerId, out PlayerMatchInfo info)
         {
@@ -1500,10 +550,11 @@ namespace League.Managers
         /// </summary>
         public void ClearAllCaches()
         {
+            playerMatchCache.Clear();
+            playerCache.Clear();
             _cachedPlayerMatchInfos.Clear();
             _currentChampBySummoner.Clear();
             _summonerToColMap.Clear();
-            playerCache.Clear();
             _cardBySummonerId.Clear();
         }
 
@@ -1516,40 +567,108 @@ namespace League.Managers
             _currentChampBySummoner.Clear();
             _summonerToColMap.Clear();
             _cachedPlayerMatchInfos.Clear();
-            playerCache.Clear();
+            playerMatchCache.Clear();
             _cardBySummonerId.Clear();
-
-            // 清理卡片列表缓存图片
-            ClearImageCache();
-
-            // 新增清理
-            _positionInfo.Clear();
-            _queriedPlayers.Clear();
-            _fullSessionData = null;
-
-            // 清理位置信息缓存
-            _positionInfo.Clear();
-            _queriedPlayers.Clear();
-            Debug.WriteLine("[清理状态] 已清除所有缓存和状态");
         }
         #endregion
 
-        #region 7. 内部类
-
+        #region 辅助方法
         /// <summary>
-        /// 存储查询过的玩家信息，用于后续补全卡片丢失（改为内部类）
+        /// 限制并发数的任务执行
         /// </summary>
-        private class PlayerBasicInfo
+        public async Task<List<TResult>> RunWithLimitedConcurrency<TInput, TResult>(
+            IEnumerable<TInput> inputs,
+            Func<TInput, Task<TResult>> taskFunc,
+            int maxConcurrency = 3)
         {
-            public long SummonerId { get; set; }
-            public long ObfuscatedId { get; set; }
-            public int ChampionId { get; set; }
-            public string GameName { get; set; }
-            public string Visibility { get; set; }
-            public bool IsPlaceholder { get; set; }
-            public DateTime LastUpdated { get; set; }
+            var indexedInputs = inputs.Select((input, index) => new { input, index }).ToList();
+            var results = new TResult[indexedInputs.Count];
+            var semaphore = new SemaphoreSlim(maxConcurrency);
+            var tasks = new List<Task>();
+
+            foreach (var item in indexedInputs)
+            {
+                await semaphore.WaitAsync();
+
+                var task = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var result = await taskFunc(item.input);
+                        results[item.index] = result;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[并发异常] Index {item.index}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                });
+
+                tasks.Add(task);
+            }
+
+            await Task.WhenAll(tasks);
+            return results.ToList();
         }
 
+        /// <summary>
+        /// 创建失败时的玩家信息
+        /// </summary>
+        public PlayerMatchInfo CreateFailedPlayerInfo(long summonerId, int championId)
+        {
+            return new PlayerMatchInfo
+            {
+                Player = new PlayerInfo
+                {
+                    SummonerId = summonerId,
+                    ChampionId = championId,
+                    ChampionName = "查询失败",
+                    GameName = "失败",
+                    IsPublic = "[失败]",
+                    SoloRank = "失败",
+                    FlexRank = "失败",
+                    Avatar = LoadErrorImage()
+                },
+                MatchItems = new List<ListViewItem>(),
+                HeroIcons = new ImageList()
+            };
+        }
+
+        /// <summary>
+        /// 加载错误图片
+        /// </summary>
+        private Image LoadErrorImage()
+        {
+            return Image.FromFile(AppDomain.CurrentDomain.BaseDirectory + "Assets\\Defaults\\Profile.png");
+        }
+
+        /// <summary>
+        /// 获取指定位置的玩家卡片
+        /// </summary>
+        private PlayerCardControl GetPlayerCardAtPosition(int row, int column)
+        {
+            var panel = _form.tableLayoutPanel1.GetControlFromPosition(column, row) as BorderPanel;
+            return panel?.Controls.Count > 0 ? panel.Controls[0] as PlayerCardControl : null;
+        }
+
+        /// <summary>
+        /// 更新玩家名字颜色
+        /// </summary>
+        private void UpdatePlayerNameColor(long summonerId, Color color)
+        {
+            if (_cardBySummonerId.TryGetValue(summonerId, out var card))
+            {
+                card.Invoke((MethodInvoker)(() =>
+                {
+                    card.lblPlayerName.LinkColor = color;
+                    card.lblPlayerName.VisitedLinkColor = color;
+                    card.lblPlayerName.ActiveLinkColor = color;
+                }));
+            }
+        }
         #endregion
     }
 }

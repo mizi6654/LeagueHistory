@@ -78,7 +78,6 @@ namespace League
 
             _configUpdateManager = new ConfigUpdateManager(this);
             _matchDetailManager = new MatchDetailManager(this);
-            _chatMessageBuilder = new ChatMessageBuilder(GetCachedPlayerInfos);
         }
 
         public void SaveAppConfig()
@@ -673,22 +672,6 @@ namespace League
         {
             return summoner["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) ?? false
                 ? "公开" : "隐藏";
-        }
-
-        // 为PlayerCardManager提供缓存访问
-        public Dictionary<long, PlayerMatchInfo> GetCachedPlayerInfos()
-        {
-            // 直接返回 PlayerCardManager 的缓存（加 null 防护）
-            if (_playerCardManager == null)
-            {
-                Debug.WriteLine("[警告] _playerCardManager 为 null，无法获取缓存");
-                return new Dictionary<long, PlayerMatchInfo>();
-            }
-
-            lock (_playerCardManager._cachedPlayerMatchInfos)  // 注意加锁，防止并发问题
-            {
-                return new Dictionary<long, PlayerMatchInfo>(_playerCardManager._cachedPlayerMatchInfos);
-            }
         }
 
         // 为消息发送提供当前Puuid
