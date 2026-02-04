@@ -18,21 +18,6 @@ namespace League.Clients
         }
 
         /// <summary>
-        /// 获取所有聊天会话
-        /// </summary>
-        public async Task<JArray> GetConversationsAsync()
-        {
-            var resp = await _client.GetAsync("/lol-chat/v1/conversations");
-            if (!resp.IsSuccessStatusCode)
-            {
-                Debug.WriteLine("[Chat] 获取会话失败");
-                return new JArray();
-            }
-
-            return JArray.Parse(await resp.Content.ReadAsStringAsync());
-        }
-
-        /// <summary>
         /// 向指定会话发送消息
         /// </summary>
         public async Task<bool> SendMessageAsync(string conversationId, string message)
@@ -60,87 +45,6 @@ namespace League.Clients
 
             return true;
         }
-
-        /// <summary>
-        /// 增强版：查找会话（支持 game / championSelect / custom / practiceTool）
-        /// </summary>
-        //public async Task<string?> FindConversationIdAsync(string type, int maxRetries = 10, int delayMs = 500)
-        //{
-        //    string[] targetTypes = type.Equals("game", StringComparison.OrdinalIgnoreCase)
-        //        ? new[] { "game", "customGame", "practiceTool", "championSelect", "inProgress", ""}
-        //        : new[] { type };
-
-        //    for (int attempt = 1; attempt <= maxRetries; attempt++)
-        //    {
-        //        try
-        //        {
-        //            var resp = await _client.GetAsync("/lol-chat/v1/conversations");
-        //            if (!resp.IsSuccessStatusCode)
-        //            {
-        //                Debug.WriteLine($"[Chat] 获取会话失败: {resp.StatusCode}");
-        //                return null;
-        //            }
-
-        //            string rawJson = await resp.Content.ReadAsStringAsync();
-        //            var conversations = JArray.Parse(rawJson);
-
-        //            Debug.WriteLine($"[Chat] 第 {attempt} 次查询，会话总数: {conversations.Count}");
-
-        //            if (attempt == 1 || conversations.Count == 0)
-        //            {
-        //                foreach (var c in conversations)
-        //                {
-        //                    Debug.WriteLine(
-        //                        $"[会话] id={c["id"]}, type={c["type"]}, name={c["name"] ?? c["gameName"] ?? "无"}"
-        //                    );
-        //                }
-        //            }
-
-        //            foreach (var target in targetTypes)
-        //            {
-        //                var match = conversations.FirstOrDefault(c =>
-        //                {
-        //                    string convType = c["type"]?.ToString() ?? "";
-        //                    string convName = c["gameName"]?.ToString() ?? c["name"]?.ToString() ?? "";
-
-        //                    return convType.Equals(target, StringComparison.OrdinalIgnoreCase)
-        //                           || convName.Contains("召唤师峡谷")
-        //                           || convName.Contains("扭曲丛林")
-        //                           || convName.Contains("极地大乱斗")
-        //                           || convName.Contains("海克斯大乱斗")
-        //                           || convName.Contains("游戏")
-        //                           || convName.Contains("ARAM")
-        //                           || convName.Contains("大乱斗")
-        //                           || convName.Contains("匹配")
-        //                           || convName.Contains("排位");
-        //                });
-
-        //                if (match != null)
-        //                {
-        //                    string? id = match["id"]?.ToString();
-        //                    if (!string.IsNullOrEmpty(id))
-        //                    {
-        //                        Debug.WriteLine($"[Chat] 找到会话 type={target}, id={id}");
-        //                        return id;
-        //                    }
-        //                }
-        //            }
-
-        //            if (attempt < maxRetries)
-        //            {
-        //                Debug.WriteLine($"[Chat] 未找到 {type} 会话，{delayMs}ms 后重试...");
-        //                await Task.Delay(delayMs);
-        //            }
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            Debug.WriteLine($"[Chat] 查找会话异常: {ex}");
-        //        }
-        //    }
-
-        //    Debug.WriteLine($"[Chat] 重试 {maxRetries} 次后仍未找到 {type} 会话");
-        //    return null;
-        //}
 
         /// <summary>
         /// 增强版：查找会话（支持多种状态）

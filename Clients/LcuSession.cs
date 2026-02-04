@@ -2,8 +2,6 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
-using System.Net.WebSockets;
-using System.Text;
 
 namespace League.Clients
 {
@@ -24,6 +22,9 @@ namespace League.Clients
         private ChampionSelectService _championSelectService;
         private ChatService _chatService;
         public ChatService ChatService => _chatService;
+
+        // 1. 在类顶部增加私有变量
+        private League.Services.GameInputService _gameInputService;
 
         /// <summary>
         /// 获取HTTP客户端（保持向后兼容）
@@ -78,6 +79,9 @@ namespace League.Clients
             _replayService = new ReplayService(_lcuClient);
             _championSelectService = new ChampionSelectService(_lcuClient, _gameflowService);
             _chatService = new ChatService(_lcuClient);
+
+            // 初始化新构建的输入服务
+            _gameInputService = new League.Services.GameInputService();
         }
 
         /// <summary>
@@ -111,70 +115,70 @@ namespace League.Clients
             }
         }
 
-        #region 发送战绩 - 增强版
+        #region 自动接受对局
         /// <summary>
-        /// 选人阶段发送（弱化），已成功发送
+        /// 接受 Ready Check（自动确认匹配）
         /// </summary>
-        public async Task<bool> SendChampSelectMessageAsync(string text)
+        public async Task<bool> AcceptReadyCheckAsync()
         {
-            Debug.WriteLine($"[SendChampSelect] 尝试发送: {text}");
-
-            var chatId = await _chatService.FindConversationIdAsync("championSelect");
-            if (!string.IsNullOrEmpty(chatId))
+            try
             {
-                bool result = await _chatService.SendMessageAsync(chatId, text);
-                Debug.WriteLine($"[SendChampSelect] 结果: {(result ? "成功" : "失败")}");
-                return result;
+                var response = await _lcuClient.PostAsync("/lol-matchmaking/v1/ready-check/accept", new StringContent(""));
+                bool success = response.IsSuccessStatusCode;
+
+                Debug.WriteLine($"[自动接受] 执行结果: {(success ? "成功" : "失败")} | Status: {response.StatusCode}");
+                return success;
             }
-
-            Debug.WriteLine("[SendChampSelect] 未找到 championSelect 会话，发送失败");
-            return false;
-        }
-
-
-        /// <summary>
-        /// 游戏内聊天API（不依赖会话查找）
-        /// </summary>
-        public async Task<bool> SendInGameMessageAsync(string message)
-        {
-            var convId = await FindGameConversationIdAsync();
-            if (string.IsNullOrEmpty(convId))
+            catch (Exception ex)
             {
-                Debug.WriteLine("[SendGameChat] 未找到 game 会话");
+                Debug.WriteLine($"[自动接受] 异常: {ex.Message}");
                 return false;
             }
-
-            message = message.Replace("\r", "");
-            if (message.Length > 200)
-                message = message.Substring(0, 200);
-
-            var payload = new
-            {
-                body = message
-            };
-
-            var resp = await _lcuClient.PostAsync(
-                $"/lol-chat/v1/conversations/{convId}/messages",
-                new StringContent(
-                    JsonConvert.SerializeObject(payload),
-                    Encoding.UTF8,
-                    "application/json")
-            );
-
-            Debug.WriteLine($"[SendGameChat] HTTP={resp.StatusCode}");
-            return resp.IsSuccessStatusCode;
         }
-        public async Task<string?> FindGameConversationIdAsync()
+        #endregion
+
+        #region 发送战绩 - 增强版
+        // 重写 LCU 选人阶段发送方法
+        public async Task<bool> SendChampSelectMessageAsync(string message)
         {
-            var resp = await _lcuClient.GetAsync("/lol-chat/v1/conversations");
-            var json = JArray.Parse(await resp.Content.ReadAsStringAsync());
+            try
+            {
+                // 假设你已经拿到了当前选人房间的 ChatRoom Id (Akari 中通常是查询 chat/v1/conversations)
+                var chatId = await _chatService.FindConversationIdAsync("championSelect");
+                if (string.IsNullOrEmpty(chatId)) return false;
 
-            var gameConv = json
-                .FirstOrDefault(c => c["type"]?.ToString() == "game");
+                // 1. 将文本拆分成多行，保证每行是一个玩家的数据
+                string[] lines = message.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
 
-            return gameConv?["id"]?.ToString();
+                foreach (var line in lines)
+                {
+                    // 2. 构造单行消息的 payload
+                    var payload = new { body = line };
+                    string json = JsonConvert.SerializeObject(payload);
+
+                    // 3. 发送给 LCU API
+                    //await PostAsync($"/lol-chat/v1/conversations/{roomId}/messages", json);
+                    await _chatService.SendMessageAsync(chatId, line);
+
+                    // 4. 绝对核心：防封/防屏蔽延时。每发一行必须停顿至少 300-500 毫秒！
+                    await Task.Delay(400);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"选人界面发送失败: {ex.Message}");
+                return false;
+            }
         }
 
+        
+        // 3. 游戏内发送逻辑直接桥接过去
+        public async Task<bool> SendInGameMessageAsync(string message)
+        {
+            if (_gameInputService == null) return false;
+            return await _gameInputService.SendInGameMessageAsync(message);
+        }
         #endregion
 
         #region 向后兼容的方法包装器

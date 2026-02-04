@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Diagnostics;
+using System.Text.RegularExpressions;
 using League.Models;
 
 namespace League.Controls
@@ -47,6 +48,9 @@ namespace League.Controls
 
         private bool _disposed;
 
+        // 存储图片引用的列表
+        private List<Image> _matchImages = new List<Image>();
+
         public MatchInfo MatchInfo
         {
             get
@@ -83,16 +87,139 @@ namespace League.Controls
             };
         }
 
+        // 添加图片到跟踪列表
+        public void TrackImage(Image image)
+        {
+            if (image != null)
+                _matchImages.Add(image);
+        }
+
+        // 清理所有图片资源
+        public void DisposeImages()
+        {
+            foreach (var image in _matchImages)
+            {
+                try
+                {
+                    if (image != null)
+                    {
+                        // 直接尝试释放，不检查 IsDisposed
+                        image.Dispose();
+                    }
+                }
+                catch { }
+            }
+            _matchImages.Clear();
+        }
+        
+
+        // 清理所有资源
+        public void DisposeAllResources()
+        {
+            DisposeImages();
+
+            // 清理控件内的图片
+            var pictureBoxes = this.Controls.OfType<PictureBox>().ToList();
+            foreach (var pb in pictureBoxes)
+            {
+                if (pb.Image != null)
+                {
+                    pb.Image.Dispose();
+                    pb.Image = null;
+                }
+            }
+
+            // 清理 MatchInfo
+            if (MatchInfo != null)
+            {
+                MatchInfo.RawGameData = null;
+                MatchInfo.AllParticipants = null;
+                MatchInfo = null;
+            }
+
+            // 解绑事件
+            this.DetailsClicked = null;
+            this.ReplayClicked = null;
+        }
+
+        // 🔥 新增：深度清理方法
+        public void DeepClean()
+        {
+            try
+            {
+                // 1. 清理图片资源
+                DisposeImages();
+
+                // 2. 清理MatchInfo中的资源
+                if (_matchInfo != null)
+                {
+                    _matchInfo.Dispose();
+                    _matchInfo = null;
+                }
+
+                // 3. 清理控件内的图片
+                var pictureBoxes = this.Controls.OfType<PictureBox>().ToList();
+                foreach (var pb in pictureBoxes)
+                {
+                    if (pb.Image != null)
+                    {
+                        try
+                        {
+                            pb.Image.Dispose();
+                        }
+                        catch { }
+                        pb.Image = null;
+                    }
+                }
+
+                // 4. 解绑事件
+                this.DetailsClicked = null;
+                this.ReplayClicked = null;
+                this.PlayerIconClicked = null;
+
+                // 5. 清理ToolTip
+                if (_tooltip != null)
+                {
+                    _tooltip.Dispose();
+                    _tooltip = null;
+                }
+
+                // 6. 清理子控件
+                this.Controls.Clear();
+
+                // 7. 清理引用
+                _lastTooltip = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MatchListPanel.DeepClean异常] {ex.Message}");
+            }
+        }
+
+        // 🔥 增强 Dispose 方法
         public new void Dispose()
         {
             if (!_disposed)
             {
                 _disposed = true;
+
+                // 先深度清理
+                DeepClean();
+
+                // 清理事件
+                DetailsClicked = null;
+                ReplayClicked = null;
+                PlayerIconClicked = null;
+
+                // 清理基类资源
+                base.Dispose();
                 _tooltip?.Dispose();
                 _matchInfo?.Dispose();
+
                 GC.SuppressFinalize(this);
             }
         }
+
 
         protected override void OnPaintBackground(PaintEventArgs e)
         {

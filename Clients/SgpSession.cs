@@ -50,35 +50,6 @@ namespace League.Clients
             return true;
         }
 
-        private async Task<bool> TrySgpRequestWithAccessToken(string version)
-        {
-            try
-            {
-                using HttpClient client = new HttpClient();
-                client.DefaultRequestHeaders.Clear();
-                client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "LeagueOfLegendsClient/14.13.596.7996 (rcp-be-lol-match-history)");
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                string fullUrl = string.Concat(str1: "/match-history-query/v1/products/lol/player/" + _puuid + "/SUMMARY", str3: string.Join("&", new List<string> { "startIndex=0", "count=1" }), str0: _sgpUrl, str2: "?");
-                HttpResponseMessage response = await client.GetAsync(fullUrl);
-                string content = await response.Content.ReadAsStringAsync();
-                Debug.WriteLine($"SGP 连接初始化状态: {response.StatusCode}");
-                if (response.IsSuccessStatusCode)
-                {
-                    _sgpClient = client;
-                    return true;
-                }
-                Debug.WriteLine($"SGP 初始化失败: {response.StatusCode}, 响应: {content}");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Exception ex2 = ex;
-                Debug.WriteLine("SGP 初始化异常: " + ex2.Message);
-                return false;
-            }
-        }
-
         public async Task<bool> LoadSessionAsync()
         {
             HttpResponseMessage resp = await _lcuClient.GetAsync("lol-login/v1/session");
@@ -90,6 +61,7 @@ namespace League.Clients
             _puuid = obj["puuid"]?.ToString();
             _summonerId = obj["summonerId"]?.ToString();
             _leagueSessionToken = obj["idToken"]?.ToString();
+
             return !string.IsNullOrEmpty(_puuid) && !string.IsNullOrEmpty(_leagueSessionToken);
         }
 
@@ -112,213 +84,122 @@ namespace League.Clients
         {
             try
             {
-                HttpResponseMessage resp = await _lcuClient.GetAsync("lol-platform-config/v1/namespaces/LoginDataPacket");
-                if (resp.IsSuccessStatusCode)
+                HttpResponseMessage resp = await _lcuClient.GetAsync("lol-platform-config/v1/namespaces");
+                if (!resp.IsSuccessStatusCode)
+                    return null;
+
+                string json = await resp.Content.ReadAsStringAsync();
+                JObject obj = JObject.Parse(json);
+
+                // 优先从 PlayerPreferences 取（最直接）
+                string sgpUrl = obj["PlayerPreferences"]?["ServiceEndpoint"]?.ToString();
+
+                // 如果上面没有，尝试从 LcuPurchaseWidget 提取
+                if (string.IsNullOrEmpty(sgpUrl))
                 {
-                    JObject obj = JObject.Parse(await resp.Content.ReadAsStringAsync());
-                    string platformId = obj["platformId"]?.ToString().ToLower();
-                    //Debug.WriteLine("[SGP] LoginDataPacket root -> platformId=" + platformId);
-                    if (!string.IsNullOrEmpty(platformId))
+                    string capUrl = obj["LcuPurchaseWidget"]?["CapOrdersUrl"]?.ToString();
+                    if (!string.IsNullOrEmpty(capUrl))
                     {
-                        string sgpUrl = MapPlatformIdToSgp(platformId);
-                        //Debug.WriteLine("[SGP] mapped sgpUrl=" + sgpUrl);
-                        return sgpUrl;
+                        // 提取基础地址
+                        var match = Regex.Match(capUrl, @"(https?://[^/]+)");
+                        if (match.Success)
+                            sgpUrl = match.Groups[1].Value;
                     }
                 }
+
+                if (!string.IsNullOrEmpty(sgpUrl))
+                {
+                    Debug.WriteLine($"[SGP] 成功获取 SGP 地址: {sgpUrl}");
+                    return sgpUrl.TrimEnd('/');
+                }
             }
             catch (Exception ex)
             {
-                Exception ex2 = ex;
-                Debug.WriteLine("[SGP] 读取 LoginDataPacket 异常: " + ex2.Message);
+                Debug.WriteLine($"[SGP] 获取 Endpoint 异常: {ex.Message}");
             }
-            Debug.WriteLine("[SGP] 未能获取到 platformId 来映射 SGP 地址");
+
+            Debug.WriteLine("[SGP] 未能获取 SGP 地址");
             return null;
         }
-
-        public string MapPlatformIdToSgp(string platformId)
-        {
-            if (string.IsNullOrWhiteSpace(platformId))
-            {
-                return null;
-            }
-            Dictionary<string, string> known = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                { "hn1", "https://hn1-k8s-sgp.lol.qq.com:21019" },
-                { "hn10", "https://hn10-k8s-sgp.lol.qq.com:21019" },
-                { "tj100", "https://tj100-sgp.lol.qq.com:21019" },
-                { "tj101", "https://tj101-sgp.lol.qq.com:21019" },
-                { "nj100", "https://nj100-sgp.lol.qq.com:21019" },
-                { "gz100", "https://gz100-sgp.lol.qq.com:21019" },
-                { "cq100", "https://cq100-sgp.lol.qq.com:21019" },
-                { "bgp2", "https://bgp2-k8s-sgp.lol.qq.com:21019" }
-            };
-            if (known.TryGetValue(platformId.Trim(), out var url))
-            {
-                return url;
-            }
-            return "https://" + platformId + "-k8s-sgp.lol.qq.com:21019";
-        }
-
-        public async Task<string> GetClientVersionAsync()
-        {
-            try
-            {
-                HttpResponseMessage resp = await _lcuClient.GetAsync("/lol-patch/v1/game-version");
-                if (!resp.IsSuccessStatusCode)
-                {
-                    return "15.19.7148453";
-                }
-                string version = (await resp.Content.ReadAsStringAsync()).Trim('"', ' ', '\r', '\n', ',');
-                int idx = version.IndexOf('+');
-                if (idx > 0)
-                {
-                    version = version.Substring(0, idx);
-                }
-                version = version.Trim().TrimEnd(',', ' ', '\r', '\n');
-                Debug.WriteLine("[LCU] ClientVersion='" + version + "'");
-                return string.IsNullOrEmpty(version) ? "15.19.7148453" : version;
-            }
-            catch (Exception ex)
-            {
-                Exception ex2 = ex;
-                Debug.WriteLine("获取版本异常: " + ex2.Message);
-                return "15.19.7148453";
-            }
-        }
-
+       
         public async Task<JArray> SgpFetchLatestMatches(string puuid, int startIndex = 0, int count = 19, string tag = null)
         {
             for (int attempt = 1; attempt <= 3; attempt++)
             {
-                using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(10.0)))
+                using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
                 {
                     try
                     {
-                        using HttpClient client = new HttpClient();
+                        using var handler = new HttpClientHandler
+                        {
+                            ServerCertificateCustomValidationCallback = (msg, cert, chain, err) => true
+                        };
+
+                        using HttpClient client = new HttpClient(handler);
+                        client.Timeout = TimeSpan.FromSeconds(30);   // 双重保险
+
                         client.DefaultRequestHeaders.Clear();
                         client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "LeagueOfLegendsClient/14.13.596.7996 (rcp-be-lol-match-history)");
                         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
                         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                        string fullUrl = string.Concat(str1: "/match-history-query/v1/products/lol/player/" + puuid + "/SUMMARY", str3: string.Join("&", new List<string>
+                        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Riot-ClientPlatform", "Windows");
+                        // client.DefaultRequestHeaders.TryAddWithoutValidation("X-Riot-ClientVersion", await GetClientVersionAsync());
+
+                        if (string.IsNullOrWhiteSpace(_sgpUrl))
                         {
-                            $"startIndex={startIndex}",
-                            $"count={count}",
-                            "tag=" + tag
-                        }), str0: _sgpUrl, str2: "?");
-                        //Debug.WriteLine($"SGP {puuid} 查询链接: {fullUrl}  尝试次数: {attempt}/{3}");
-                        //Debug.WriteLine($"SGP查询战绩 {puuid} 尝试次数: {attempt}/{3}");
+                            Debug.WriteLine("❌ _sgpUrl 为空");
+                            return null;
+                        }
+
+                        string path = $"/match-history-query/v1/products/lol/player/{puuid}/SUMMARY";
+                        var queries = new List<string> { $"startIndex={startIndex}", $"count={count}" };
+                        if (!string.IsNullOrEmpty(tag)) queries.Add($"tag={tag}");
+
+                        string fullUrl = _sgpUrl.TrimEnd('/') + path + "?" + string.Join("&", queries);
+                        Debug.WriteLine($"SGP 请求地址: {fullUrl} (尝试 {attempt}/3)");
+
                         Stopwatch watch = Stopwatch.StartNew();
                         HttpResponseMessage response = await client.GetAsync(fullUrl, cts.Token);
                         watch.Stop();
-                        Debug.WriteLine($"SGP {puuid} 查询状态: {response.StatusCode}  耗时: {watch.ElapsedMilliseconds}ms");
+
+                        Debug.WriteLine($"SGP 查询状态: {response.StatusCode} 耗时: {watch.ElapsedMilliseconds}ms");
+
                         if (response.IsSuccessStatusCode)
                         {
-                            JObject json = JObject.Parse(await response.Content.ReadAsStringAsync());
+                            string content = await response.Content.ReadAsStringAsync();
+                            JObject json = JObject.Parse(content);
                             return json["games"] as JArray;
                         }
-                        Debug.WriteLine($"请求失败（状态码: {response.StatusCode}），准备刷新 Token 并重试...");
+                        else
+                        {
+                            string errorContent = await response.Content.ReadAsStringAsync();
+                            Debug.WriteLine($"请求失败: {response.StatusCode} - {errorContent}");
+                        }
                     }
-                    catch (TaskCanceledException)
+                    catch (TaskCanceledException tce)
                     {
-                        Debug.WriteLine($"SGP 查询超时，准备刷新 Token 并重试...（尝试 {attempt}/{3}）");
+                        Debug.WriteLine($"SGP 查询超时（尝试 {attempt}/3）: {tce.Message}");
                     }
-                    catch (Exception ex2)
+                    catch (HttpRequestException hre)
                     {
-                        Exception ex3 = ex2;
-                        Debug.WriteLine($"获取战绩异常: {ex3.Message}（尝试 {attempt}/{3}）");
+                        Debug.WriteLine($"HTTP 请求异常: {hre.Message} (Inner: {hre.InnerException?.Message})");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"其他异常: {ex.Message}");
                     }
                 }
+
                 if (!await LoadEntitlementsTokenAsync())
                 {
-                    Debug.WriteLine("刷新 Token 失败，终止重试。");
+                    Debug.WriteLine("刷新 Token 失败");
                     return null;
                 }
-                await Task.Delay(1000);
+                await Task.Delay(1500);
             }
-            Debug.WriteLine("SGP 查询在多次重试后仍未成功。");
+
+            Debug.WriteLine("SGP 多次重试后仍失败");
             return null;
-        }
-
-        public async Task<string> SgpFetchRankedStats(string puuid)
-        {
-            try
-            {
-                using HttpClient client = new HttpClient();
-                client.DefaultRequestHeaders.Clear();
-                client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "LeagueOfLegendsClient/14.13.596.7996 (rcp-be-lol-match-history)");
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                GetPlatformIdFromSgpUrl();
-                string fullUrl = string.Concat(str1: "/leagues-ledge/v2/rankedStats/puuid/" + puuid, str0: _sgpUrl);
-                Debug.WriteLine("SGP 排位查询链接: " + fullUrl);
-                using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(3.0));
-                HttpResponseMessage response = await client.GetAsync(fullUrl, cts.Token);
-                Debug.WriteLine($"SGP 排位查询状态: {response.StatusCode}");
-                if (response.IsSuccessStatusCode)
-                {
-                    string content = await response.Content.ReadAsStringAsync();
-                    Debug.WriteLine("sgp 排位：" + content);
-                    return content;
-                }
-                return null;
-            }
-            catch (OperationCanceledException)
-            {
-                Debug.WriteLine("排位查询超时");
-                return null;
-            }
-            catch (Exception ex2)
-            {
-                Exception ex3 = ex2;
-                Debug.WriteLine("获取排位数据异常: " + ex3.Message);
-                return null;
-            }
-        }
-
-        public async Task<string> SgpFetchSummonerInfo(string puuid)
-        {
-            try
-            {
-                using HttpClient client = new HttpClient();
-                client.DefaultRequestHeaders.Clear();
-                client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "LeagueOfLegendsClient/14.13.596.7996 (rcp-be-lol-match-history)");
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                string platformId = GetPlatformIdFromSgpUrl();
-                string apiPath = "/summoner-ledge/v1/regions/" + platformId + "/summoners/puuids";
-                string[] puuids = new string[1] { puuid };
-                string jsonContent = JsonConvert.SerializeObject(puuids);
-                StringContent contentData = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-                string fullUrl = _sgpUrl + apiPath;
-                Debug.WriteLine("SGP 召唤师查询链接: " + fullUrl);
-                using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(3.0));
-                HttpResponseMessage response = await client.PostAsync(fullUrl, contentData, cts.Token);
-                Debug.WriteLine($"SGP 召唤师查询状态: {response.StatusCode}");
-                if (response.IsSuccessStatusCode)
-                {
-                    string content = await response.Content.ReadAsStringAsync();
-                    Debug.WriteLine("sgp 玩家：" + content);
-                    return content;
-                }
-                return null;
-            }
-            catch (OperationCanceledException)
-            {
-                Debug.WriteLine("召唤师查询超时");
-                return null;
-            }
-            catch (Exception ex2)
-            {
-                Exception ex3 = ex2;
-                Debug.WriteLine("获取召唤师信息异常: " + ex3.Message);
-                return null;
-            }
-        }
-
-        private string GetPlatformIdFromSgpUrl()
-        {
-            Match match = Regex.Match(_sgpUrl, "https://([^-]+)-");
-            return match.Success ? match.Groups[1].Value.ToLower() : "unknown";
         }
     }
 }

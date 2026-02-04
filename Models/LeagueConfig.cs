@@ -23,5 +23,22 @@ namespace League.Models
         public bool EnablePreliminaryInRanked { get; set; } = true;    // 排位（单双/灵活）
         public bool EnablePreliminaryInAram { get; set; } = true;      // 大乱斗
         public bool EnablePreliminaryInNexusBlitz { get; set; } = true; // 海克斯大乱斗（2400）
+
+        // ==================== 新增：战绩/自定义文本发送配置 ====================
+
+        /// <summary>
+        /// 发送信息模式：1 = 自动发送战绩，2 = 发送自定义文本
+        /// </summary>
+        public int SendMode { get; set; } = 1;
+
+        /// <summary>
+        /// 存储自定义发送的文本内容（支持多行诗词/歌词）
+        /// </summary>
+        public string CustomSendContent { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 是否启用自动接受对局（Ready Check）
+        /// </summary>
+        public bool EnableAutoAcceptQueue { get; set; } = false;
     }
 }

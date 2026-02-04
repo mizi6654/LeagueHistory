@@ -17,6 +17,10 @@ namespace League.UIState
         private ToolTip _toolTip = new ToolTip();
         private int _lastIndex = -1;
 
+        // 加载动画相关
+        private System.Windows.Forms.Timer? _currentLoadingTimer;
+        private bool _isShowingLoading = false;
+
         public bool IsGame { get; set; }
         public bool LcuReady { get; set; }
 
@@ -28,16 +32,14 @@ namespace League.UIState
 
         private void InitializeToolTip()
         {
-            _toolTip = new ToolTip
-            {
-                AutoPopDelay = 5000,
-                InitialDelay = 100,
-                ReshowDelay = 100,
-                ShowAlways = true
-            };
+            _toolTip.AutoPopDelay = 5000;
+            _toolTip.InitialDelay = 100;
+            _toolTip.ReshowDelay = 100;
+            _toolTip.ShowAlways = true;
         }
 
-        #region 加载提示管理
+        #region 加载提示管理（核心优化）
+
         /// <summary>
         /// 显示轻柔半透明加载提示
         /// </summary>
@@ -45,19 +47,25 @@ namespace League.UIState
         {
             SafeInvoke(_form, () =>
             {
-                if (_loadingOverlay != null && !_loadingOverlay.IsDisposed)
+                // 已经在显示中则跳过
+                if (_isShowingLoading && _loadingOverlay != null && !_loadingOverlay.IsDisposed)
                     return;
 
-                // 灰色半透明遮罩
+                // 清理旧的（防止竞态）
+                CleanupCurrentLoadingOverlay();
+
+                _isShowingLoading = true;
+
+                // 创建加载遮罩
                 _loadingOverlay = new Panel
                 {
                     Size = new Size((int)(_form.Width * 0.6), (int)(_form.Height * 0.4)),
-                    BackColor = Color.FromArgb(160, 255, 255, 255),
+                    BackColor = Color.FromArgb(0, 255, 255, 255),
                     BorderStyle = BorderStyle.FixedSingle,
                     Visible = false
                 };
 
-                // 居中定位
+                // 居中
                 _loadingOverlay.Location = new Point(
                     (_form.ClientSize.Width - _loadingOverlay.Width) / 2,
                     (_form.ClientSize.Height - _loadingOverlay.Height) / 2
@@ -77,31 +85,53 @@ namespace League.UIState
                     (_loadingOverlay.Width - lbl.Width) / 2,
                     (_loadingOverlay.Height - lbl.Height) / 2
                 );
-                _loadingOverlay.Controls.Add(lbl);
 
-                // 添加到窗体顶层
+                _loadingOverlay.Controls.Add(lbl);
                 _form.Controls.Add(_loadingOverlay);
                 _loadingOverlay.BringToFront();
-
-                // 渐显动画
                 _loadingOverlay.Visible = true;
-                _loadingOverlay.BackColor = Color.FromArgb(0, 255, 255, 255);
 
-                var timer = new System.Windows.Forms.Timer { Interval = 20 };
-                int alpha = 0;
-                timer.Tick += (s, e) =>
-                {
-                    alpha += 15;
-                    if (alpha >= 160)
-                    {
-                        alpha = 160;
-                        timer.Stop();
-                        timer.Dispose();
-                    }
-                    _loadingOverlay!.BackColor = Color.FromArgb(alpha, 255, 255, 255);
-                };
-                timer.Start();
+                StartFadeInAnimation();
             });
+        }
+
+        private void StartFadeInAnimation()
+        {
+            _currentLoadingTimer?.Stop();
+            _currentLoadingTimer?.Dispose();
+
+            var timer = new System.Windows.Forms.Timer { Interval = 20 };
+            _currentLoadingTimer = timer;
+
+            int alpha = 0;
+
+            timer.Tick += (s, e) =>
+            {
+                if (_loadingOverlay == null || _loadingOverlay.IsDisposed)
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    _currentLoadingTimer = null;
+                    return;
+                }
+
+                alpha += 20;
+                if (alpha >= 160)
+                {
+                    alpha = 160;
+                    timer.Stop();
+                    timer.Dispose();
+                    _currentLoadingTimer = null;
+                }
+
+                try
+                {
+                    _loadingOverlay.BackColor = Color.FromArgb(alpha, 255, 255, 255);
+                }
+                catch { }
+            };
+
+            timer.Start();
         }
 
         /// <summary>
@@ -111,83 +141,102 @@ namespace League.UIState
         {
             SafeInvoke(_form, () =>
             {
-                if (_loadingOverlay == null) return;
+                if (!_isShowingLoading || _loadingOverlay == null)
+                    return;
+
+                _isShowingLoading = false;
 
                 var timer = new System.Windows.Forms.Timer { Interval = 20 };
                 int alpha = 160;
+
                 timer.Tick += (s, e) =>
                 {
-                    alpha -= 15;
+                    if (_loadingOverlay == null || _loadingOverlay.IsDisposed)
+                    {
+                        timer.Stop();
+                        timer.Dispose();
+                        return;
+                    }
+
+                    alpha -= 20;
                     if (alpha <= 0)
                     {
                         timer.Stop();
                         timer.Dispose();
-
-                        _form.Controls.Remove(_loadingOverlay);
-                        _loadingOverlay.Dispose();
-                        _loadingOverlay = null;
+                        CleanupCurrentLoadingOverlay();
                     }
                     else
                     {
-                        _loadingOverlay.BackColor = Color.FromArgb(alpha, 255, 255, 255);
+                        try
+                        {
+                            _loadingOverlay.BackColor = Color.FromArgb(alpha, 255, 255, 255);
+                        }
+                        catch { }
                     }
                 };
+
                 timer.Start();
             });
         }
+
+        /// <summary>
+        /// 彻底清理当前加载遮罩
+        /// </summary>
+        private void CleanupCurrentLoadingOverlay()
+        {
+            _currentLoadingTimer?.Stop();
+            _currentLoadingTimer?.Dispose();
+            _currentLoadingTimer = null;
+
+            if (_loadingOverlay != null)
+            {
+                try
+                {
+                    if (_form.Controls.Contains(_loadingOverlay))
+                        _form.Controls.Remove(_loadingOverlay);
+
+                    _loadingOverlay.Dispose();
+                }
+                catch { }
+                finally
+                {
+                    _loadingOverlay = null;
+                }
+            }
+
+            _isShowingLoading = false;
+        }
+
         #endregion
 
         #region LCU连接状态管理
-        /// <summary>
-        /// 设置LCU连接状态
-        /// </summary>
+
         public void SetLcuUiState(bool connected, bool inGame)
         {
-            // 先清除两个tab的所有状态消息
             ClearAllStatusMessages(_form.panelMatchList);
             ClearAllStatusMessages(_form.penalGameMatchData);
 
             if (!connected)
             {
-                SafeInvoke(_form.panelMatchList, () =>
-                {
-                    ShowLcuNotConnectedMessage(_form.panelMatchList);
-                });
-                SafeInvoke(_form.penalGameMatchData, () =>
-                {
-                    ShowLcuNotConnectedMessage(_form.penalGameMatchData);
-                });
+                SafeInvoke(_form.panelMatchList, () => ShowLcuNotConnectedMessage(_form.panelMatchList));
+                SafeInvoke(_form.penalGameMatchData, () => ShowLcuNotConnectedMessage(_form.penalGameMatchData));
             }
-            else
+            else if (!inGame)
             {
-                // 连接成功，第一个tab显示战绩（由其他代码处理）
-                // 第二个tab根据是否在游戏中显示不同消息
-                if (!inGame)
-                {
-                    SafeInvoke(_form.penalGameMatchData, () =>
-                    {
-                        ShowWaitingForGameMessage(_form.penalGameMatchData);
-                    });
-                }
-                // 如果在游戏中（inGame = true），第二个tab会显示玩家卡片
+                SafeInvoke(_form.penalGameMatchData, () => ShowWaitingForGameMessage(_form.penalGameMatchData));
             }
         }
 
-        /// <summary>
-        /// 清除所有状态消息（只清除状态面板，不碰其他控件）
-        /// </summary>
         private void ClearAllStatusMessages(Control parentControl)
         {
             SafeInvoke(parentControl, () =>
             {
-                // 只清除状态面板，不碰 tableLayoutPanel1
                 var statusPanels = parentControl.Controls.OfType<Panel>()
-                    .Where(p => p != _form.tableLayoutPanel1 && p != _loadingOverlay) // 排除重要控件
+                    .Where(p => p != _form.tableLayoutPanel1 && p != _loadingOverlay)
                     .ToList();
 
                 foreach (var panel in statusPanels)
                 {
-                    // 进一步判断是否是状态面板（根据子控件或特性）
                     if (IsStatusPanel(panel))
                     {
                         parentControl.Controls.Remove(panel);
@@ -197,12 +246,8 @@ namespace League.UIState
             });
         }
 
-        /// <summary>
-        /// 判断是否为状态面板
-        /// </summary>
         private bool IsStatusPanel(Panel panel)
         {
-            // 方法1：检查是否有特定标签或文本
             var labels = panel.Controls.OfType<Label>();
             if (labels.Any(l => l.Text.Contains("正在检测客户端连接") ||
                                l.Text.Contains("正在等待加入游戏")))
@@ -210,18 +255,8 @@ namespace League.UIState
                 return true;
             }
 
-            // 方法2：检查是否有进度条
             if (panel.Controls.OfType<ProgressBar>().Any())
-            {
                 return true;
-            }
-
-            // 方法3：检查面板尺寸或位置特性
-            if (panel.Anchor == AnchorStyles.None &&
-                panel.Width == 500 && panel.Height == 200)
-            {
-                return true;
-            }
 
             return false;
         }
@@ -230,8 +265,8 @@ namespace League.UIState
         {
             Panel containerPanel = new Panel
             {
-                Width = 500,
-                Height = 200,
+                Width = 580,
+                Height = 280,
                 BackColor = Color.Transparent
             };
 
@@ -247,117 +282,136 @@ namespace League.UIState
             ProgressBar progress = new ProgressBar
             {
                 Style = ProgressBarStyle.Marquee,
-                Width = 200,
+                Width = 220,
                 Height = 30,
                 MarqueeAnimationSpeed = 30
             };
-
             progress.Left = (containerPanel.Width - progress.Width) / 2;
             progress.Top = label.Bottom + 10;
+
             containerPanel.Controls.Add(label);
             containerPanel.Controls.Add(progress);
 
             if (showLolLauncher)
             {
                 LOLHelper helper = new LOLHelper();
-                string exePath = helper.GetLOLLoginExePath();
-                LinkLabel linkLolPath = new LinkLabel
+                string officialPath = helper.GetOfficialLauncherPath();
+                string wegamePath = helper.GetWeGameLauncherPath();
+
+                LinkLabel linkOfficial = new LinkLabel
                 {
                     AutoSize = true,
-                    Text = string.IsNullOrEmpty(exePath) ? "未检测到 LOL 登录程序" : exePath,
-                    Font = new Font("微软雅黑", 10f, FontStyle.Regular)
+                    Font = new Font("微软雅黑", 9.5f, FontStyle.Regular),
+                    Text = string.IsNullOrEmpty(officialPath) ? "未找到官方客户端" : officialPath,
+                    LinkColor = Color.DodgerBlue
                 };
 
-                Button btnStartLol = new Button
+                LinkLabel linkWeGame = new LinkLabel
                 {
-                    Text = "启动LOL登录程序",
-                    Width = 200,
-                    Height = 30
+                    AutoSize = true,
+                    Font = new Font("微软雅黑", 9.5f, FontStyle.Regular),
+                    Text = string.IsNullOrEmpty(wegamePath) ? "未找到 WeGame 版" : wegamePath,
+                    LinkColor = Color.DodgerBlue
                 };
 
-                linkLolPath.Left = (containerPanel.Width - linkLolPath.PreferredWidth) / 2;
-                linkLolPath.Top = progress.Bottom + 30;
-                btnStartLol.Left = (containerPanel.Width - btnStartLol.Width) / 2;
-                btnStartLol.Top = linkLolPath.Bottom + 10;
-                containerPanel.Controls.Add(linkLolPath);
-                containerPanel.Controls.Add(btnStartLol);
-
-                if (!string.IsNullOrEmpty(exePath))
+                Button btnOfficial = new Button
                 {
-                    linkLolPath.LinkClicked += delegate
-                    {
-                        string? directoryName = Path.GetDirectoryName(exePath);
-                        if (Directory.Exists(directoryName))
-                        {
-                            Process.Start("explorer.exe", directoryName!);
-                        }
-                    };
+                    Text = "启动官方客户端",
+                    Width = 170,
+                    Height = 38,
+                    Enabled = !string.IsNullOrEmpty(officialPath)
+                };
 
-                    btnStartLol.Click += delegate
-                    {
-                        linkLolPath.Text = exePath;
-                        if (!string.IsNullOrEmpty(exePath))
-                        {
-                            Debug.WriteLine("找到 LOL 登录程序：" + exePath);
-                            helper.StartLOLLoginProgram(exePath);
-                        }
-                        else
-                        {
-                            Debug.WriteLine("未检测到 LOL 登录程序！");
-                        }
-                    };
-                }
+                Button btnWeGame = new Button
+                {
+                    Text = "启动 WeGame 版",
+                    Width = 170,
+                    Height = 38,
+                    Enabled = !string.IsNullOrEmpty(wegamePath)
+                };
+
+                linkOfficial.LinkClicked += (s, e) => OpenFolder(officialPath);
+                linkWeGame.LinkClicked += (s, e) => OpenFolder(wegamePath);
+
+                linkOfficial.Left = (containerPanel.Width - linkOfficial.PreferredWidth) / 2;
+                linkOfficial.Top = progress.Bottom + 15;
+
+                linkWeGame.Left = (containerPanel.Width - linkWeGame.PreferredWidth) / 2;
+                linkWeGame.Top = linkOfficial.Bottom + 8;
+
+                btnOfficial.Left = (containerPanel.Width - btnOfficial.Width * 2 - 30) / 2;
+                btnOfficial.Top = linkWeGame.Bottom + 15;
+
+                btnWeGame.Left = btnOfficial.Left + btnOfficial.Width + 30;
+                btnWeGame.Top = btnOfficial.Top;
+
+                containerPanel.Controls.Add(linkOfficial);
+                containerPanel.Controls.Add(linkWeGame);
+                containerPanel.Controls.Add(btnOfficial);
+                containerPanel.Controls.Add(btnWeGame);
+
+                btnOfficial.Click += (s, e) =>
+                {
+                    helper.StartOfficialClient();
+                    if (!string.IsNullOrEmpty(officialPath)) helper.SaveCustomPath(officialPath);
+                };
+
+                btnWeGame.Click += (s, e) =>
+                {
+                    helper.StartWeGameClient();
+                    if (!string.IsNullOrEmpty(wegamePath)) helper.SaveCustomPath(wegamePath);
+                };
             }
 
             return containerPanel;
         }
 
+        private void OpenFolder(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath)) return;
+            try
+            {
+                string? dir = Path.GetDirectoryName(exePath);
+                if (Directory.Exists(dir))
+                    Process.Start("explorer.exe", dir);
+            }
+            catch { }
+        }
+
         private void ShowLcuNotConnectedMessage(Control parentControl)
         {
             parentControl.Controls.Clear();
-
-            var panel = CreateStatusPanel(
-                "正在检测客户端连接，请确保登录了游戏...",
-                showLolLauncher: true
-            );
-
+            var panel = CreateStatusPanel("正在检测客户端连接，请确保登录了游戏...", true);
             panel.Left = (parentControl.Width - panel.Width) / 2;
             panel.Top = (parentControl.Height - panel.Height) / 2;
             panel.Anchor = AnchorStyles.None;
-
             parentControl.Controls.Add(panel);
         }
 
         private void ShowWaitingForGameMessage(Control parentControl)
         {
-            // 只清除等待面板，不清除其他控件
             if (_waitingPanel != null)
             {
                 if (parentControl.Controls.Contains(_waitingPanel))
-                {
                     parentControl.Controls.Remove(_waitingPanel);
-                }
                 _waitingPanel.Dispose();
                 _waitingPanel = null;
             }
 
-            // 隐藏tableLayoutPanel1，但不清除它
             _form.tableLayoutPanel1.Visible = false;
 
-            _waitingPanel = CreateStatusPanel("正在等待加入游戏，请稍后...", showLolLauncher: false);
-
+            _waitingPanel = CreateStatusPanel("正在等待加入游戏，请稍后...", false);
             _waitingPanel.Left = (parentControl.Width - _waitingPanel.Width) / 2;
             _waitingPanel.Top = (parentControl.Height - _waitingPanel.Height) / 2;
             _waitingPanel.Anchor = AnchorStyles.None;
 
             parentControl.Controls.Add(_waitingPanel);
         }
+
         #endregion
 
         #region Tab控制相关
-        /// <summary>
-        /// TabControl鼠标移动事件处理
-        /// </summary>
+
         public void HandleImageTabControlMouseMove(object? sender, MouseEventArgs e)
         {
             var tabControl = sender as ImageTabControl;
@@ -383,9 +437,6 @@ namespace League.UIState
             _lastIndex = -1;
         }
 
-        /// <summary>
-        /// Tab切换事件处理
-        /// </summary>
         public void HandleTabSelectionChanged(int selectedIndex, Poller tab1Poller)
         {
             switch (selectedIndex)
@@ -411,83 +462,50 @@ namespace League.UIState
                 {
                     SetLcuUiState(LcuReady, IsGame);
                 }
-                catch (TaskCanceledException)
-                {
-                    // 忽略
-                }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"Tab1Poller轮询异常: {ex}");
                 }
             }, 3000);
         }
+
         #endregion
 
         #region 工具方法
-        /// <summary>
-        /// 线程安全的UI调用（彻底解决“在创建窗口句柄之前不能调用 Invoke”问题）
-        /// </summary>
+
         public static void SafeInvoke(Control? control, Action action)
         {
             if (control == null || control.IsDisposed || action == null)
                 return;
 
-            // 第一优先级：如果句柄已创建，使用标准 Invoke 流程
             if (control.IsHandleCreated)
             {
                 if (control.InvokeRequired)
                 {
                     try
                     {
-                        control.BeginInvoke(new Action(() =>
-                        {
-                            try
-                            {
-                                action();
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine($"[SafeInvoke 内层异常] {ex.Message}");
-                            }
-                        }));
+                        control.BeginInvoke(action);
                     }
-                    catch (InvalidOperationException)
-                    {
-                        // 控件正在销毁或句柄已失效，静默忽略
-                    }
+                    catch { }
                 }
                 else
                 {
-                    try
-                    {
-                        action();
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[SafeInvoke 直接执行异常] {ex.Message}");
-                    }
+                    try { action(); }
+                    catch (Exception ex) { Debug.WriteLine($"[SafeInvoke] {ex.Message}"); }
                 }
             }
             else
             {
-                // 第二优先级：句柄未创建 → 此时必然在 UI 线程（因为非 UI 线程无法创建控件）
-                // 直接执行是安全的，且必须执行（否则 UI 更新会丢失）
-                try
-                {
-                    action();
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[SafeInvoke 句柄未创建时执行异常] {ex.Message}");
-                }
+                try { action(); }
+                catch (Exception ex) { Debug.WriteLine($"[SafeInvoke] {ex.Message}"); }
             }
         }
 
-        // 重载：支持直接传 Form
         public static void SafeInvoke(Form form, Action action)
         {
             SafeInvoke((Control)form, action);
         }
+
         #endregion
     }
 }

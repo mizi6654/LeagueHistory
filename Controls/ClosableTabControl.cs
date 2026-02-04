@@ -1,4 +1,5 @@
-﻿using System.Drawing.Drawing2D;
+﻿using League.uitls;
+using System.Drawing.Drawing2D;
 using static League.FormMain;
 
 namespace League.Controls
@@ -45,7 +46,24 @@ namespace League.Controls
                     }
                     else
                     {
-                        TabPages.Remove(page);
+                        // 查找父级控件中的 MatchTabContent
+                        var parent = this.Parent;
+                        while (parent != null && !(parent is MatchTabContent))
+                        {
+                            parent = parent.Parent;
+                        }
+
+                        if (parent is MatchTabContent matchTabContent)
+                        {
+                            // 调用公开的关闭方法
+                            matchTabContent.CloseTab(page);
+                        }
+                        else
+                        {
+                            // 回退方案：直接移除
+                            TabPages.Remove(page);
+                            page.Dispose();
+                        }
                     }
                     break;
                 }

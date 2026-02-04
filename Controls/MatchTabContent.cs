@@ -1,5 +1,6 @@
 ﻿using League.Controls;
 using League.Models;
+using League.States;
 using System.Diagnostics;
 using static League.FormMain;
 
@@ -9,11 +10,10 @@ namespace League.uitls
     {
         private Dictionary<TabPage, MatchTabPageContent> _tabPageContents = new Dictionary<TabPage, MatchTabPageContent>();
         public ClosableTabControl MainTabControl => closableTabControl1;
+
         public MatchTabContent()
         {
             InitializeComponent();
-
-            // 手动处理 Tab 页关闭
             MainTabControl.ControlRemoved += OnTabPageRemoved;
         }
 
@@ -21,16 +21,17 @@ namespace League.uitls
         {
             if (e.Control is TabPage tabPage)
             {
-                // 当 Tab 页被移除时清理资源
                 if (_tabPageContents.TryGetValue(tabPage, out var content))
                 {
-                    content.Cleanup();
+                    // 调用清理方法
+                    content.ForceCleanup();
                     _tabPageContents.Remove(tabPage);
                 }
             }
         }
 
-        private void CloseTab(TabPage tab)
+        // 🔥 修改访问权限为 public
+        public void CloseTab(TabPage tab)
         {
             string? puuid = tab.Tag as string;
             if (puuid != null && string.Equals(puuid, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase))
@@ -39,22 +40,36 @@ namespace League.uitls
                 return;
             }
 
+            // 1. 停止并清理内容控件
             if (_tabPageContents.TryGetValue(tab, out var content))
             {
-                content.Cleanup();
-                content.Dispose();
+                content.ForceCleanup();
                 _tabPageContents.Remove(tab);
             }
+
+            // 2. 移除 Tab 前先清理其内容
+            foreach (Control control in tab.Controls)
+            {
+                if (control is IDisposable disposable)
+                    disposable.Dispose();
+            }
+            tab.Controls.Clear();
+
+            // 3. 移除 Tab
             MainTabControl.TabPages.Remove(tab);
+
+            // 4. 完全释放 Tab 页
             tab.Dispose();
-            GC.Collect();
+
+            // 5. 强制 GC
+            GC.Collect(2, GCCollectionMode.Forced);
             GC.WaitForPendingFinalizers();
+
+            Debug.WriteLine($"[内存清理] Tab已关闭，当前内存使用: {Process.GetCurrentProcess().WorkingSet64 / 1024 / 1024}MB");
         }
 
-        // 手动清理所有 Tab 页
         public void CleanupAllTabs()
         {
-            // 如果只剩自己 Tab，就不清理
             if (MainTabControl.TabPages.Count == 1 &&
                 string.Equals(MainTabControl.TabPages[0].Tag as string, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase))
             {
@@ -62,18 +77,20 @@ namespace League.uitls
                 return;
             }
 
-            foreach (var tabContent in _tabPageContents.Values)
-            {
-                tabContent.Cleanup();
-            }
-            _tabPageContents.Clear();
-            MainTabControl.TabPages.Clear();
+            // 先获取所有Tab页的副本
+            var tabs = MainTabControl.TabPages.Cast<TabPage>().ToList();
 
-            // 强制 GC 回收
+            foreach (var tab in tabs)
+            {
+                CloseTab(tab);
+            }
+
+            _tabPageContents.Clear();
             GC.Collect();
             GC.WaitForPendingFinalizers();
         }
 
+        // 修改 CreateNewTab 方法，移除或修改上限逻辑
         public void CreateNewTab(
             string summonerId,
             string gameName,
@@ -81,10 +98,10 @@ namespace League.uitls
             string puuid,
             string profileIconId,
             string summonerLevel,
-            string privacy, Dictionary<string, RankedStats> rankedStats)
+            string privacy,
+            Dictionary<string, RankedStats> rankedStats)
         {
-
-            // 检查是否已存在（只检查一次）
+            // 检查是否已存在
             foreach (TabPage page in MainTabControl.TabPages)
             {
                 if (string.Equals(page.Tag as string, puuid, StringComparison.OrdinalIgnoreCase))
@@ -94,28 +111,77 @@ namespace League.uitls
 
                     if (_tabPageContents.TryGetValue(page, out var existingContent))
                     {
+                        // 判断是否是当前玩家
+                        bool isCurrentPlayer = string.Equals(puuid, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase);
+
                         string fullGameName = $"{gameName}#{tagLine}";
-                        existingContent.InitiaRank(fullGameName, profileIconId, summonerLevel, privacy, rankedStats);
-                        Task.Run(async () =>
+
+                        // 更新段位信息
+                        _ = existingContent.InitiaRank(fullGameName, profileIconId, summonerLevel, privacy, rankedStats);
+
+                        // 🔥 修改：使用延迟异步执行，避免立即递归
+                        if (RefreshState.ForceMatchRefresh)
                         {
-                            try
+                            Debug.WriteLine($"[强制刷新] 检测到 ForceMatchRefresh=true，为 puuid={puuid} 设置刷新标记");
+
+                            // 不立即执行刷新，而是设置一个标记，稍后执行
+                            existingContent.SetNeedsRefresh(true);
+
+                            // 延迟执行刷新，避免递归
+                            Task.Delay(500).ContinueWith(async _ =>
                             {
-                                await existingContent.SafeInitializeAsync(puuid);
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine($"延迟加载失败: {ex.Message}");
-                            }
-                        });
+                                try
+                                {
+                                    // 再次检查标记
+                                    if (existingContent.NeedsRefresh)
+                                    {
+                                        Debug.WriteLine($"[延迟刷新] 开始执行延迟刷新，PUUID: {puuid}");
+                                        await existingContent.ForceRefreshData(puuid);
+                                        existingContent.SetNeedsRefresh(false);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"[延迟刷新异常] {ex.Message}");
+                                }
+                            }, TaskScheduler.FromCurrentSynchronizationContext());
+                        }
+                        else if (isCurrentPlayer)
+                        {
+                            Debug.WriteLine("[当前玩家] 已切换到当前玩家标签页");
+                        }
                     }
                     return;
                 }
+            }
 
-                // 限制最大 Tab 数量（放在循环里，但建议移到外面更安全）
-                if (MainTabControl.TabPages.Count >= 8)
+            // 🔥 移除或修改上限逻辑
+            // 可选：设置一个较大的上限，比如20个
+            const int MAX_TABS = 20;
+            if (MainTabControl.TabPages.Count >= MAX_TABS)
+            {
+                // 找到第一个非自己的Tab页
+                TabPage oldestNonSelfTab = null;
+                foreach (TabPage tab in MainTabControl.TabPages)
                 {
-                    var oldestTab = MainTabControl.TabPages[0];
-                    CloseTab(oldestTab);
+                    string? tabPuuid = tab.Tag as string;
+                    if (tabPuuid != null && !string.Equals(tabPuuid, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        oldestNonSelfTab = tab;
+                        break;
+                    }
+                }
+
+                if (oldestNonSelfTab != null)
+                {
+                    CloseTab(oldestNonSelfTab);
+                }
+                else
+                {
+                    // 所有都是自己的Tab（理论上不可能，但做保护）
+                    MessageBox.Show($"已达到最大Tab数量({MAX_TABS})，请先关闭一些标签页", "提示",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
             }
 
@@ -131,21 +197,20 @@ namespace League.uitls
             // 绑定数据加载方法
             tabContent.LoadDataRequested += async (p, beg, end, q) =>
             {
-                //return await ((FormMain)this.ParentForm).LoadMatchDataAsync(p, beg, end, q);
                 return await ((FormMain)this.ParentForm).LoadFullMatchDataAsync(p, beg, end, q);
             };
 
-            // 绑定解析事件（带puuid参数）
-            tabContent.ParsePanelRequested += async (match, puuidParam,index) =>
+            // 绑定解析事件
+            tabContent.ParsePanelRequested += async (match, puuidParam, index) =>
             {
-                return await ((FormMain)this.ParentForm).ParseGameToPanelAsync(match, summonerId,gameName, tagLine,index);
+                return await ((FormMain)this.ParentForm).ParseGameToPanelAsync(match, summonerId, gameName, tagLine, index);
             };
 
-            // 初始化段位信息（立即显示基础资料）
+            // 初始化段位信息
             string fullName = gameName + "#" + tagLine;
             tabContent.InitiaRank(fullName, profileIconId, summonerLevel, privacy, rankedStats);
 
-            // 延迟加载比赛数据（不在主线程阻塞）
+            // 延迟加载比赛数据
             Task.Run(async () =>
             {
                 try
@@ -158,13 +223,11 @@ namespace League.uitls
                 }
             });
 
-
             // 添加控件
             newTab.Controls.Add(tabContent);
             MainTabControl.TabPages.Add(newTab);
             MainTabControl.SelectedTab = newTab;
-            _tabPageContents[newTab] = tabContent; // ❗你没有加这个，导致后续刷新失败
-
+            _tabPageContents[newTab] = tabContent;
         }
     }
 }

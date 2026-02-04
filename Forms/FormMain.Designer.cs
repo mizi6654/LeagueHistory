@@ -44,6 +44,7 @@ namespace League
             tabPage3 = new TabPage();
             tabControl1 = new TabControl();
             tabPage4 = new TabPage();
+            chkAutoAccept = new CheckBox();
             groupBox1 = new GroupBox();
             chkNexus = new CheckBox();
             chkAram = new CheckBox();
@@ -52,6 +53,11 @@ namespace League
             lkbPreliminary = new LinkLabel();
             checkBoxFilterMode = new CheckBox();
             tabPage5 = new TabPage();
+            label3 = new Label();
+            label2 = new Label();
+            txtCustomContent = new TextBox();
+            rbModeCustom = new RadioButton();
+            rbModeMatch = new RadioButton();
             panel1.SuspendLayout();
             imageTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
@@ -61,6 +67,7 @@ namespace League
             tabControl1.SuspendLayout();
             tabPage4.SuspendLayout();
             groupBox1.SuspendLayout();
+            tabPage5.SuspendLayout();
             SuspendLayout();
             // 
             // panel1
@@ -203,6 +210,7 @@ namespace League
             // 
             // tabPage4
             // 
+            tabPage4.Controls.Add(chkAutoAccept);
             tabPage4.Controls.Add(groupBox1);
             tabPage4.Controls.Add(checkBoxFilterMode);
             tabPage4.Location = new Point(4, 26);
@@ -213,6 +221,16 @@ namespace League
             tabPage4.Text = "功能辅助";
             tabPage4.UseVisualStyleBackColor = true;
             // 
+            // chkAutoAccept
+            // 
+            chkAutoAccept.AutoSize = true;
+            chkAutoAccept.Location = new Point(16, 55);
+            chkAutoAccept.Name = "chkAutoAccept";
+            chkAutoAccept.Size = new Size(147, 21);
+            chkAutoAccept.TabIndex = 7;
+            chkAutoAccept.Text = "是否启用自动接受对局";
+            chkAutoAccept.UseVisualStyleBackColor = true;
+            // 
             // groupBox1
             // 
             groupBox1.Controls.Add(chkNexus);
@@ -220,7 +238,7 @@ namespace League
             groupBox1.Controls.Add(chkRanked);
             groupBox1.Controls.Add(chkNormal);
             groupBox1.Controls.Add(lkbPreliminary);
-            groupBox1.Location = new Point(16, 55);
+            groupBox1.Location = new Point(16, 93);
             groupBox1.Name = "groupBox1";
             groupBox1.Size = new Size(363, 124);
             groupBox1.TabIndex = 6;
@@ -292,13 +310,64 @@ namespace League
             // 
             // tabPage5
             // 
+            tabPage5.Controls.Add(label3);
+            tabPage5.Controls.Add(label2);
+            tabPage5.Controls.Add(txtCustomContent);
+            tabPage5.Controls.Add(rbModeCustom);
+            tabPage5.Controls.Add(rbModeMatch);
             tabPage5.Location = new Point(4, 26);
             tabPage5.Name = "tabPage5";
             tabPage5.Padding = new Padding(3);
             tabPage5.Size = new Size(1167, 770);
             tabPage5.TabIndex = 1;
-            tabPage5.Text = "tabPage5";
+            tabPage5.Text = "消息发送";
             tabPage5.UseVisualStyleBackColor = true;
+            // 
+            // label3
+            // 
+            label3.Location = new Point(710, 158);
+            label3.Name = "label3";
+            label3.Size = new Size(440, 67);
+            label3.TabIndex = 4;
+            label3.Text = "发送自定义信息：将要发送的内容输入进行，默认一行一条，然后在【选人窗口/游戏内聊天】会根据输入的文本进行发送，快捷键同上";
+            // 
+            // label2
+            // 
+            label2.Location = new Point(710, 43);
+            label2.Name = "label2";
+            label2.Size = new Size(440, 71);
+            label2.TabIndex = 3;
+            label2.Text = "发送战绩信息：即（选人窗口按【ctrl+f7】发送我方战绩信息到聊天窗口），同理在游戏内按【f9】则发送我方战绩到聊天窗口，按【f12】则发送所有人战绩信息，我方队伍5人与敌方队伍5人的战绩信息到聊天窗口";
+            // 
+            // txtCustomContent
+            // 
+            txtCustomContent.Location = new Point(138, 43);
+            txtCustomContent.Multiline = true;
+            txtCustomContent.Name = "txtCustomContent";
+            txtCustomContent.Size = new Size(545, 668);
+            txtCustomContent.TabIndex = 2;
+            // 
+            // rbModeCustom
+            // 
+            rbModeCustom.AutoSize = true;
+            rbModeCustom.Location = new Point(138, 16);
+            rbModeCustom.Name = "rbModeCustom";
+            rbModeCustom.Size = new Size(110, 21);
+            rbModeCustom.TabIndex = 1;
+            rbModeCustom.TabStop = true;
+            rbModeCustom.Text = "发送自定义信息";
+            rbModeCustom.UseVisualStyleBackColor = true;
+            // 
+            // rbModeMatch
+            // 
+            rbModeMatch.AutoSize = true;
+            rbModeMatch.Location = new Point(17, 16);
+            rbModeMatch.Name = "rbModeMatch";
+            rbModeMatch.Size = new Size(98, 21);
+            rbModeMatch.TabIndex = 0;
+            rbModeMatch.TabStop = true;
+            rbModeMatch.Text = "发送战绩信息";
+            rbModeMatch.UseVisualStyleBackColor = true;
             // 
             // FormMain
             // 
@@ -309,7 +378,7 @@ namespace League
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "League v1.0.6";
+            Text = "League v1.0.7";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
             imageTabControl1.ResumeLayout(false);
@@ -323,6 +392,8 @@ namespace League
             tabPage4.PerformLayout();
             groupBox1.ResumeLayout(false);
             groupBox1.PerformLayout();
+            tabPage5.ResumeLayout(false);
+            tabPage5.PerformLayout();
             ResumeLayout(false);
         }
 
@@ -348,5 +419,11 @@ namespace League
         private CheckBox chkAram;
         private CheckBox chkRanked;
         private CheckBox chkNormal;
+        private TextBox txtCustomContent;
+        private RadioButton rbModeCustom;
+        private RadioButton rbModeMatch;
+        private Label label3;
+        private Label label2;
+        private CheckBox chkAutoAccept;
     }
 }

@@ -5,7 +5,6 @@ using League.Extensions;
 using League.Infrastructure;
 using League.Managers;
 using League.Models;
-using League.Networking;
 using League.Parsers;
 using League.PrimaryElection;
 using League.Services;
@@ -40,6 +39,7 @@ namespace League
         private CancellationTokenSource? _champSelectCts;
         public int myTeamId = 0;
         public List<string> lastChampSelectSnapshot = new List<string>();
+        public string lastChampSelectSnapshotString = "";   // 新增：更可靠的快照字符串
         private Poller _tab1Poller = new Poller();
         private bool _champSelectMessageSent = false;
         public JArray? _cachedMyTeam;
@@ -78,6 +78,9 @@ namespace League
 
             _configUpdateManager = new ConfigUpdateManager(this);
             _matchDetailManager = new MatchDetailManager(this);
+
+            // 🔥 正确初始化 ChatMessageBuilder
+            _chatMessageBuilder = new ChatMessageBuilder(_playerCardManager.GetAllCachedPlayerInfos);
         }
 
         public void SaveAppConfig()
@@ -117,12 +120,40 @@ namespace League
                 chkRanked.Checked = _appConfig.EnablePreliminaryInRanked;   //排位
                 chkAram.Checked = _appConfig.EnablePreliminaryInAram;       //大乱斗
                 chkNexus.Checked = _appConfig.EnablePreliminaryInNexusBlitz;    //海克斯乱斗
+                chkAutoAccept.Checked = _appConfig.EnableAutoAcceptQueue;   // 在恢复其他复选框的位置添加
+
+                // 根据配置文件恢复消息发送信息 ===
+                if (rbModeMatch != null && rbModeCustom != null && txtCustomContent != null)
+                {
+                    // 1. 恢复文本框里的内容
+                    txtCustomContent.Text = _appConfig.CustomSendContent ?? string.Empty;
+
+                    // 2. 依据配置勾选对应的单选框
+                    if (_appConfig.SendMode == 2)
+                    {
+                        rbModeCustom.Checked = true;
+                        txtCustomContent.Visible = true; // 显示文本框
+                    }
+                    else
+                    {
+                        rbModeMatch.Checked = true;
+                        txtCustomContent.Visible = false; // 隐藏文本框
+                    }
+
+                    // 3. 恢复后再绑定事件，防止初始化触发不必要的自动保存
+                    rbModeMatch.CheckedChanged += SendMode_CheckedChanged;
+                    rbModeCustom.CheckedChanged += SendMode_CheckedChanged;
+
+                    // 绑定文本框失去焦点事件，用来自动保存文本
+                    txtCustomContent.Leave += TxtCustomContent_Leave;
+                }
 
                 // 绑定事件（建议统一一个事件处理）
                 chkNormal.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkRanked.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkAram.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkNexus.CheckedChanged += ModeCheckBox_CheckedChanged;
+                chkAutoAccept.CheckedChanged += AutoAccept_CheckedChanged;
 
                 // 安装热键钩子
                 InstallKeyboardHook();
@@ -280,7 +311,9 @@ namespace League
             }
         }
 
-        // 低级键盘钩子回调（核心）
+        
+
+        // 低级键盘钩子回调（核心） - 已加异常保护
         private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode < 0)
@@ -288,74 +321,63 @@ namespace League
                 return CallNextHookEx(_hookId, nCode, wParam, lParam);
             }
 
-            if (wParam == (IntPtr)WM_KEYDOWN)
+            try
             {
-                int vkCode = Marshal.ReadInt32(lParam);
-                Keys key = (Keys)vkCode;
-
-                bool isCtrlDown = (GetAsyncKeyState((int)Keys.ControlKey) & 0x8000) != 0;
-
-                // 只处理我们关心的按键
-                bool isTargetKey = (key == Keys.F9 || key == Keys.F11 || key == Keys.F12 ||
-                                   (isCtrlDown && key == Keys.F7));
-
-                if (isTargetKey)
+                if (wParam == (IntPtr)WM_KEYDOWN)
                 {
-                    DateTime now = DateTime.Now;
-                    if ((now - _lastHookTrigger) < _debounceInterval)
+                    int vkCode = Marshal.ReadInt32(lParam);
+                    Keys key = (Keys)vkCode;
+
+                    bool isCtrlDown = (GetAsyncKeyState((int)Keys.ControlKey) & 0x8000) != 0;
+
+                    bool isTargetKey = (key == Keys.F9 || key == Keys.F11 || key == Keys.F12 ||
+                                       (isCtrlDown && key == Keys.F7));
+
+                    if (isTargetKey)
                     {
-                        Debug.WriteLine($"[钩子防抖] 忽略 {key}，间隔太短");
-                        return (IntPtr)1; // 吞掉，避免重复
+                        DateTime now = DateTime.Now;
+                        if ((now - _lastHookTrigger) < _debounceInterval)
+                        {
+                            return (IntPtr)1;
+                        }
+                        _lastHookTrigger = now;
+
+                        Debug.WriteLine($"[钩子触发] {key} 被按下 (Ctrl={isCtrlDown})");
+
+                        // 异步处理
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                string phase = await GetGameflowPhaseSafe();
+
+                                Debug.WriteLine($"[热键处理] 当前阶段: {phase}");
+
+                                if (phase == "InProgress")
+                                {
+                                    if (key == Keys.F9 || key == Keys.F11)
+                                        await HandleMyTeam();
+                                    else if (key == Keys.F12)
+                                        await HandleFullTeam();
+                                }
+                                else if (phase == "ChampSelect" && isCtrlDown && key == Keys.F7)
+                                {
+                                    await HandleChampSelectF7();
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[热键执行异常] {ex.Message}\n{ex.StackTrace}");
+                            }
+                        });
+
+                        return (IntPtr)1; // 吞掉按键
                     }
-                    _lastHookTrigger = now;
-
-                    string keyDesc = key switch
-                    {
-                        Keys.F9 => "F9 (我方)",
-                        Keys.F11 => "F11 (我方-备用)",
-                        Keys.F12 => "F12 (全队)",
-                        Keys.F7 when isCtrlDown => "Ctrl+F7 (选人)",
-                        _ => key.ToString()
-                    };
-
-                    Debug.WriteLine($"[钩子触发] {keyDesc} at {now:HH:mm:ss.fff} (Ctrl={isCtrlDown})");
-
-                    // 异步处理，避免阻塞钩子回调
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            string phase = await GetGameflowPhaseSafe();
-
-                            if (phase == "InProgress")
-                            {
-                                if (key == Keys.F9 || key == Keys.F11)
-                                {
-                                    await HandleMyTeam();
-                                }
-                                else if (key == Keys.F12)
-                                {
-                                    await HandleFullTeam();
-                                }
-                            }
-                            else if (phase == "ChampSelect" && isCtrlDown && key == Keys.F7)
-                            {
-                                await HandleChampSelectF7();
-                            }
-                            else
-                            {
-                                Debug.WriteLine($"[钩子] 阶段不支持: {phase}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"[钩子处理异常] {keyDesc} - {ex.Message}");
-                        }
-                    });
-
-                    // 推荐：吞掉按键，让游戏收不到 F9/F12（避免红色框/截图）
-                    return (IntPtr)1;
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HookCallback 顶层异常] {ex.Message}");
             }
 
             return CallNextHookEx(_hookId, nCode, wParam, lParam);
@@ -364,7 +386,7 @@ namespace League
 
         #region 热键监听
 
-        // 🔥 新增：选人阶段发送（Ctrl+F7）
+        // 🔥 选人阶段发送（Ctrl+F7）
         private async Task HandleChampSelectF7()
         {
             string phase = await GetGameflowPhaseSafe();
@@ -374,57 +396,105 @@ namespace League
                 return;
             }
 
-            var myTeam = _cachedMyTeam;
-            if (myTeam == null || myTeam.Count == 0)
+            // --- 线程安全地获取 UI 状态 ---
+            bool isCustomMode = false;
+            string msg = "";
+            this.Invoke(() =>
             {
-                Debug.WriteLine("[Ctrl+F7] 我方队伍缓存为空");
-                return;
+                isCustomMode = rbModeCustom?.Checked ?? false;
+                msg = txtCustomContent?.Text ?? "";
+            });
+
+            // 如果是战绩模式，走原有逻辑
+            if (!isCustomMode)
+            {
+                var myTeam = _cachedMyTeam;
+                if (myTeam == null || myTeam.Count == 0)
+                {
+                    Debug.WriteLine("[Ctrl+F7] 缓存为空，尝试从Session实时获取");
+                    var session = await Globals.lcuClient.GetChampSelectSession();
+                    if (session != null) _cachedMyTeam = session["myTeam"] as JArray;
+                    myTeam = _cachedMyTeam;
+                }
+
+                if (myTeam == null || myTeam.Count == 0)
+                {
+                    Debug.WriteLine("[Ctrl+F7] 仍无法获取我方队伍数据");
+                    return;
+                }
+
+                msg = _chatMessageBuilder!.BuildMyTeamSummary(myTeam);
             }
 
-            string msg = _chatMessageBuilder!.BuildMyTeamSummary(myTeam);
             if (string.IsNullOrWhiteSpace(msg))
             {
-                Debug.WriteLine("[Ctrl+F7] 生成的消息为空");
+                Debug.WriteLine("[Ctrl+F7] 发送的消息为空");
                 return;
             }
 
-            // 选人阶段发送（优先使用 LcuSession 里已有的方法）
             bool success = await Globals.lcuClient.SendChampSelectMessageAsync(msg);
-
-            // 如果上面失败，再尝试用 InGameChatSender 的通用方式（兼容性更强）
-            if (!success)
-            {
-                Debug.WriteLine("[Ctrl+F7] 选人发送失败，不再 fallback");
-            }
-
-            Debug.WriteLine($"[Ctrl+F7] 选人阶段发送 {(success ? "成功" : "失败")}");
+            Debug.WriteLine($"[Ctrl+F7] 发送 {(success ? "成功" : "失败")}");
         }
 
-        // 🔥 新增：我方队伍发送（F9/F11通用）
+        private bool _isSendingMessage = false;
+
+        // 🔥 我方队伍发送（F9 / F11）
         private async Task HandleMyTeam()
         {
+            if (_isSendingMessage) return;
+
             string phase = await GetGameflowPhaseSafe();
             if (phase != "InProgress")
             {
-                Debug.WriteLine($"[F9] 非游戏阶段: {phase}");
+                Debug.WriteLine($"[F9/F11] 非游戏阶段: {phase}");
                 return;
             }
 
-            var myTeam = _cachedMyTeam;
-            if (myTeam == null || myTeam.Count == 0)
+            // --- 线程安全地获取 UI 状态 ---
+            bool isCustomMode = false;
+            string msg = "";
+            this.Invoke(() =>
             {
-                Debug.WriteLine("[F9] 我方队伍为空");
-                return;
+                isCustomMode = rbModeCustom?.Checked ?? false;
+                msg = txtCustomContent?.Text ?? "";
+            });
+
+            // 如果是战绩模式，走原有逻辑
+            if (!isCustomMode)
+            {
+                var myTeam = _cachedMyTeam;
+                if (myTeam == null || myTeam.Count == 0)
+                {
+                    Debug.WriteLine("[F9/F11] 缓存为空，尝试从Session获取");
+                    var session = await Globals.lcuClient.GetChampSelectSession();
+                    if (session != null) _cachedMyTeam = session["myTeam"] as JArray;
+                    myTeam = _cachedMyTeam;
+                }
+
+                if (myTeam == null || myTeam.Count == 0)
+                {
+                    Debug.WriteLine("[F9/F11] 无法获取我方队伍");
+                    return;
+                }
+
+                msg = _chatMessageBuilder!.BuildMyTeamSummary(myTeam);
             }
 
-            string msg = _chatMessageBuilder!.BuildMyTeamSummary(myTeam);
             if (string.IsNullOrWhiteSpace(msg)) return;
 
-            bool success = await Globals.lcuClient.SendInGameMessageAsync(msg);
-            Debug.WriteLine($"[F9] 发送结果: {(success ? "成功" : "失败")}");
+            try
+            {
+                _isSendingMessage = true;
+                bool success = await Globals.lcuClient.SendInGameMessageAsync(msg);
+                Debug.WriteLine($"[F9/F11] 发送结果: {(success ? "成功" : "失败")}");
+            }
+            finally
+            {
+                _isSendingMessage = false;
+            }
         }
 
-        // 🔥 新增：我方+敌方发送（F12）
+        // 🔥 全队发送（F12）
         private async Task HandleFullTeam()
         {
             string phase = await GetGameflowPhaseSafe();
@@ -434,11 +504,43 @@ namespace League
                 return;
             }
 
-            var myTeam = _cachedMyTeam;
-            var enemyTeam = _cachedEnemyTeam;
-            if (myTeam?.Count > 0 == false || enemyTeam?.Count > 0 == false) return;
+            // --- 线程安全地获取 UI 状态 ---
+            bool isCustomMode = false;
+            string msg = "";
+            this.Invoke(() =>
+            {
+                isCustomMode = rbModeCustom?.Checked ?? false;
+                msg = txtCustomContent?.Text ?? "";
+            });
 
-            string msg = _chatMessageBuilder!.BuildFullTeamSummary(myTeam, enemyTeam);
+            // 如果是战绩模式，走原有逻辑
+            if (!isCustomMode)
+            {
+                var myTeam = _cachedMyTeam;
+                var enemyTeam = _cachedEnemyTeam;
+
+                if (myTeam?.Count == 0 || enemyTeam?.Count == 0)
+                {
+                    Debug.WriteLine("[F12] 缓存为空，尝试从GameSession获取");
+                    var session = await Globals.lcuClient.GetGameSession();
+                    if (session != null)
+                    {
+                        myTeam = session["gameData"]?["teamOne"] as JArray;
+                        enemyTeam = session["gameData"]?["teamTwo"] as JArray;
+                        _cachedMyTeam = myTeam;
+                        _cachedEnemyTeam = enemyTeam;
+                    }
+                }
+
+                if (myTeam?.Count > 0 == false || enemyTeam?.Count > 0 == false)
+                {
+                    Debug.WriteLine("[F12] 仍无法获取队伍数据");
+                    return;
+                }
+
+                msg = _chatMessageBuilder!.BuildFullTeamSummary(myTeam, enemyTeam);
+            }
+
             if (string.IsNullOrWhiteSpace(msg)) return;
 
             bool success = await Globals.lcuClient.SendInGameMessageAsync(msg);
@@ -466,14 +568,25 @@ namespace League
         /// </summary>
         public async Task InitializeDefaultTab()
         {
+            Debug.WriteLine($"[InitializeDefaultTab] 开始，ForceMatchRefresh={RefreshState.ForceMatchRefresh}");
+
             var summoner = await Globals.lcuClient.GetCurrentSummoner();
-            if (summoner == null) return;
+            if (summoner == null)
+            {
+                Debug.WriteLine("[InitializeDefaultTab] 获取当前召唤师失败");
+                return;
+            }
 
             Globals.CurrentPuuid = summoner["puuid"]?.ToString() ?? "";
             Globals.CurrentSummonerName = summoner["gameName"]?.ToString();
 
+            Debug.WriteLine($"[InitializeDefaultTab] 当前玩家 PUUID: {Globals.CurrentPuuid}");
+
             var rankedStats = await GetRankedStatsAsync(summoner["puuid"]?.ToString() ?? "");
             string privacyStatus = GetPrivacyStatus(summoner);
+
+            // 记录调用 CreateNewTab 前的状态
+            Debug.WriteLine($"[InitializeDefaultTab] 调用 CreateNewTab，ForceMatchRefresh={RefreshState.ForceMatchRefresh}");
 
             _matchTabContent?.CreateNewTab(
                 summoner["summonerId"]?.ToString() ?? "",
@@ -485,6 +598,8 @@ namespace League
                 privacyStatus,
                 rankedStats
             );
+
+            Debug.WriteLine("[InitializeDefaultTab] 完成");
         }
 
         private async void btn_search_Click(object sender, EventArgs e)
@@ -535,11 +650,21 @@ namespace League
             var rankedStats = await GetRankedStatsAsync(summoner["puuid"]?.ToString() ?? "");
             string privacyStatus = GetPrivacyStatus(summoner);
 
+            // 检查是否是当前玩家
+            string summonerPuuid = summoner["puuid"]?.ToString() ?? "";
+            bool isCurrentPlayer = string.Equals(summonerPuuid, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase);
+
+            // 如果是当前玩家，提示用户
+            if (isCurrentPlayer)
+            {
+                Debug.WriteLine("[查询] 查询的是当前玩家，将刷新数据");
+            }
+
             _matchTabContent?.CreateNewTab(
                 summoner["summonerId"]?.ToString() ?? "",
                 summoner["gameName"]?.ToString() ?? "",
                 summoner["tagLine"]?.ToString() ?? "",
-                summoner["puuid"]?.ToString() ?? "",
+                summonerPuuid,
                 summoner["profileIconId"]?.ToString() ?? "",
                 summoner["summonerLevel"]?.ToString() ?? "",
                 privacyStatus,
@@ -788,6 +913,46 @@ namespace League
             Debug.WriteLine("[自动预选模式] 配置已更新并保存");
         }
 
+        private void AutoAccept_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_appConfig == null) return;
+            _appConfig.EnableAutoAcceptQueue = chkAutoAccept.Checked;
+
+            SaveAppConfig();
+
+            Debug.WriteLine($"[自动接受对局] 已更新配置: {_appConfig.EnableAutoAcceptQueue}");
+        }
+
+        // 当用户切换单选按钮时触发
+        private void SendMode_CheckedChanged(object sender, EventArgs e)
+        {
+            if (rbModeCustom == null || txtCustomContent == null || _appConfig == null) return;
+
+            // 联动控制文本框的显示与隐藏
+            txtCustomContent.Visible = rbModeCustom.Checked;
+
+            // 更新配置对象：如果是勾选了自定义，存2，否则存1
+            _appConfig.SendMode = rbModeCustom.Checked ? 2 : 1;
+
+            // 顺便联动切换文本框的显示隐藏
+            txtCustomContent.Visible = rbModeCustom.Checked;
+
+            // 存盘
+            SaveAppConfig();
+        }
+
+        // 当多行文本框失去焦点（鼠标点击别处或切换窗口）时触发保存
+        private void TxtCustomContent_Leave(object sender, EventArgs e)
+        {
+            if (txtCustomContent == null || _appConfig == null) return;
+
+            // 将当前文本框的内容同步到配置中
+            _appConfig.CustomSendContent = txtCustomContent.Text;
+
+            // 存盘
+            SaveAppConfig();
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (_matchTabContent != null)
@@ -806,6 +971,8 @@ namespace League
             UninstallKeyboardHook();
 
             base.OnFormClosing(e);
+
+            _playerCardManager._uiLock?.Dispose();  // 如果你在 FormMain 持有引用的话
         }
         #endregion
 

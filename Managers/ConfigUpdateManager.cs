@@ -117,14 +117,12 @@ namespace League.Managers
                 // 不打扰用户，只在调试输出里看得到
             }
         }
-        
 
         private async Task PerformAutoUpdate(string zipUrl, string newVersion)
         {
             string tempDir = Path.Combine(Path.GetTempPath(), "LeagueUpdaterTemp");
             string zipPath = Path.Combine(tempDir, "update.zip");
             string extractPath = Path.Combine(tempDir, "extract");
-
             ProgressForm progressForm = null;
 
             try
@@ -133,21 +131,19 @@ namespace League.Managers
                 progressForm.Owner = _mainForm;
                 progressForm.Show(_mainForm);
 
-                // 构造函数已设置初始提示，这里只加延迟，确保用户看到至少 3 秒
-                await Task.Delay(3000);  // 3 秒延迟，让初始文字充分显示
+                await Task.Delay(3000);
 
                 await Task.Run(async () =>
                 {
-                    // 清空临时目录...
+                    // 清空并创建临时目录
                     if (Directory.Exists(tempDir))
                     {
-                        try { Directory.Delete(tempDir, true); }
-                        catch { }
+                        try { Directory.Delete(tempDir, true); } catch { }
                     }
                     Directory.CreateDirectory(tempDir);
                     Directory.CreateDirectory(extractPath);
 
-                    // 下载 + 重试 + 进度（保持原有）
+                    // ==================== 下载部分（保持你现在的逻辑）====================
                     int retryCount = 0;
                     const int maxDownloadRetries = 3;
                     bool downloadSuccess = false;
@@ -156,7 +152,17 @@ namespace League.Managers
                     {
                         try
                         {
-                            using var response = await http.GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead);
+                            var randomQuery = "?t=" + DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                            string freshZipUrl = zipUrl + randomQuery;
+
+                            using var request = new HttpRequestMessage(HttpMethod.Get, freshZipUrl);
+                            request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
+                            {
+                                NoCache = true,
+                                NoStore = true
+                            };
+
+                            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
                             response.EnsureSuccessStatusCode();
 
                             var totalBytes = response.Content.Headers.ContentLength.GetValueOrDefault(-1L);
@@ -180,33 +186,24 @@ namespace League.Managers
                                         "（速度受网络影响，可能较慢，请勿关闭窗口）", percent));
                                 }
                             }
-
                             downloadSuccess = true;
                         }
                         catch (Exception ex) when (ex is HttpRequestException || ex is IOException)
                         {
                             retryCount++;
-                            if (retryCount >= maxDownloadRetries)
-                            {
-                                throw new Exception($"下载失败，已重试 {maxDownloadRetries} 次", ex);
-                            }
-
+                            if (retryCount >= maxDownloadRetries) throw;
                             progressForm.Invoke(() => progressForm.UpdateStatus(
-                                $"下载失败，正在第 {retryCount}/{maxDownloadRetries} 次重试...\r\n" +
-                                "（可能是网络波动，请保持耐心）", null));
-
+                                $"下载失败，正在第 {retryCount}/{maxDownloadRetries} 次重试...\r\n", null));
                             await Task.Delay(3000 * retryCount);
                         }
                     }
 
                     if (!downloadSuccess)
-                    {
                         throw new Exception("多次尝试后仍无法下载更新包");
-                    }
 
-                    progressForm.Invoke(() => progressForm.UpdateStatus("下载完成，正在解压并覆盖文件..."));
+                    progressForm.Invoke(() => progressForm.UpdateStatus("下载完成，正在解压..."));
 
-                    // 3. 解压（你的原有逻辑）
+                    // ==================== 解压 ====================
                     using (var archive = ZipFile.OpenRead(zipPath))
                     {
                         foreach (var entry in archive.Entries)
@@ -214,8 +211,8 @@ namespace League.Managers
                             if (string.IsNullOrEmpty(entry.Name)) continue;
 
                             string destPath = Path.Combine(extractPath, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                            string destDir = Path.GetDirectoryName(destPath)!;
 
-                            string destDir = Path.GetDirectoryName(destPath);
                             if (!Directory.Exists(destDir))
                                 Directory.CreateDirectory(destDir);
 
@@ -226,26 +223,40 @@ namespace League.Managers
                         }
                     }
 
-                    progressForm.Invoke(() => progressForm.UpdateStatus("解压完成，正在准备重启..."));
+                    progressForm.Invoke(() => progressForm.UpdateStatus("解压完成，正在生成更新脚本..."));
 
-                    // 4. 生成 bat（不变）
+                    // ==================== 生成带备份恢复的 BAT ====================
                     string batPath = Path.Combine(tempDir, "update.bat");
                     string appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
                     string exeName = Path.GetFileName(Application.ExecutablePath);
 
                     string batContent = $@"
-                    @echo off
-                    title 更新中，请勿关闭...
-                    timeout /t 2 /nobreak >nul
-                    xcopy ""{extractPath}\*.*"" ""{appDir}\"" /s /e /y /q /i /h
-                    echo {newVersion} > ""{appDir}\version.txt""
-                    start """" /d ""{appDir}"" ""{exeName}""
-                    rd /s /q ""{tempDir}""
-                    exit";
+@echo off
+title 更新中，请勿关闭...
+timeout /t 2 /nobreak >nul
 
-                    File.WriteAllText(batPath, batContent);
+REM 备份用户配置文件
+if exist ""{appDir}\LeagueConfig.json"" (
+    copy /y ""{appDir}\LeagueConfig.json"" ""{tempDir}\LeagueConfig.json.bak"" >nul
+)
 
-                    // 5. 启动 bat
+REM 全量覆盖更新文件
+xcopy ""{extractPath}\*.*"" ""{appDir}\"" /s /e /y /q /i /h
+
+REM 恢复用户配置文件（防止被新版本的json覆盖）
+if exist ""{tempDir}\LeagueConfig.json.bak"" (
+    copy /y ""{tempDir}\LeagueConfig.json.bak"" ""{appDir}\LeagueConfig.json"" >nul
+)
+
+echo {newVersion} > ""{appDir}\version.txt""
+
+start """" /d ""{appDir}"" ""{exeName}""
+rd /s /q ""{tempDir}""
+exit";
+
+                    File.WriteAllText(batPath, batContent, System.Text.Encoding.UTF8);
+
+                    // 启动 BAT 并退出当前程序
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = batPath,
@@ -254,7 +265,6 @@ namespace League.Managers
                         WindowStyle = ProcessWindowStyle.Hidden
                     });
 
-                    // 6. 关闭进度窗并退出
                     progressForm.Invoke(() =>
                     {
                         progressForm.Complete("更新完成，正在重启程序...");
@@ -264,9 +274,207 @@ namespace League.Managers
             }
             catch (Exception ex)
             {
-                // 失败处理不变...
+                progressForm?.Invoke(() => progressForm.Complete($"更新失败: {ex.Message}"));
+                Debug.WriteLine("[自动更新失败] " + ex);
             }
         }
+
+        //private async Task PerformAutoUpdate(string zipUrl, string newVersion)
+        //{
+        //    string tempDir = Path.Combine(Path.GetTempPath(), "LeagueUpdaterTemp");
+        //    string zipPath = Path.Combine(tempDir, "update.zip");
+        //    string extractPath = Path.Combine(tempDir, "extract");
+
+        //    ProgressForm progressForm = null;
+
+        //    try
+        //    {
+        //        progressForm = new ProgressForm();
+        //        progressForm.Owner = _mainForm;
+        //        progressForm.Show(_mainForm);
+
+        //        // 构造函数已设置初始提示，这里只加延迟，确保用户看到至少 3 秒
+        //        await Task.Delay(3000);  // 3 秒延迟，让初始文字充分显示
+
+        //        await Task.Run(async () =>
+        //        {
+        //            // 清空临时目录...
+        //            if (Directory.Exists(tempDir))
+        //            {
+        //                try { Directory.Delete(tempDir, true); }
+        //                catch { }
+        //            }
+        //            Directory.CreateDirectory(tempDir);
+        //            Directory.CreateDirectory(extractPath);
+
+        //            // 下载 + 重试 + 进度（保持原有）
+        //            int retryCount = 0;
+        //            const int maxDownloadRetries = 3;
+        //            bool downloadSuccess = false;
+
+        //            while (retryCount < maxDownloadRetries && !downloadSuccess)
+        //            {
+        //                try
+        //                {
+        //                    using var response = await http.GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead);
+        //                    response.EnsureSuccessStatusCode();
+
+        //                    var totalBytes = response.Content.Headers.ContentLength.GetValueOrDefault(-1L);
+        //                    using var remoteStream = await response.Content.ReadAsStreamAsync();
+        //                    using var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
+
+        //                    byte[] buffer = new byte[81920];
+        //                    long downloadedBytes = 0;
+        //                    int bytesRead;
+
+        //                    while ((bytesRead = await remoteStream.ReadAsync(buffer)) > 0)
+        //                    {
+        //                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
+        //                        downloadedBytes += bytesRead;
+
+        //                        if (totalBytes > 0)
+        //                        {
+        //                            int percent = (int)((downloadedBytes * 100L) / totalBytes);
+        //                            progressForm.Invoke(() => progressForm.UpdateStatus(
+        //                                $"从 GitHub 下载中... {percent}% ({downloadedBytes / 1024 / 1024} MB)\r\n" +
+        //                                "（速度受网络影响，可能较慢，请勿关闭窗口）", percent));
+        //                        }
+        //                    }
+
+        //                    downloadSuccess = true;
+        //                }
+        //                catch (Exception ex) when (ex is HttpRequestException || ex is IOException)
+        //                {
+        //                    retryCount++;
+        //                    if (retryCount >= maxDownloadRetries)
+        //                    {
+        //                        throw new Exception($"下载失败，已重试 {maxDownloadRetries} 次", ex);
+        //                    }
+
+        //                    progressForm.Invoke(() => progressForm.UpdateStatus(
+        //                        $"下载失败，正在第 {retryCount}/{maxDownloadRetries} 次重试...\r\n" +
+        //                        "（可能是网络波动，请保持耐心）", null));
+
+        //                    await Task.Delay(3000 * retryCount);
+        //                }
+        //            }
+
+        //            if (!downloadSuccess)
+        //            {
+        //                throw new Exception("多次尝试后仍无法下载更新包");
+        //            }
+
+        //            progressForm.Invoke(() => progressForm.UpdateStatus("下载完成，正在解压并覆盖文件..."));
+
+        //            // 3. 解压（你的原有逻辑）
+        //            using (var archive = ZipFile.OpenRead(zipPath))
+        //            {
+        //                foreach (var entry in archive.Entries)
+        //                {
+        //                    if (string.IsNullOrEmpty(entry.Name)) continue;
+
+        //                    string destPath = Path.Combine(extractPath, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+
+        //                    string destDir = Path.GetDirectoryName(destPath);
+        //                    if (!Directory.Exists(destDir))
+        //                        Directory.CreateDirectory(destDir);
+
+        //                    if (File.Exists(destPath))
+        //                        File.Delete(destPath);
+
+        //                    entry.ExtractToFile(destPath);
+        //                }
+        //            }
+
+        //            progressForm.Invoke(() => progressForm.UpdateStatus("解压完成，正在准备重启..."));
+
+        //            // 4. 生成 bat（不变）
+        //            string batPath = Path.Combine(tempDir, "update.bat");
+        //            string appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+        //            string exeName = Path.GetFileName(Application.ExecutablePath);
+
+        //            // 备份配置文件
+        //            string configFile = "LeagueConfig.json";
+        //            string configPath = Path.Combine(appDir, configFile);
+        //            string backupConfigPath = Path.Combine(tempDir, "backup_" + configFile);
+
+        //            if (File.Exists(configPath))
+        //            {
+        //                File.Copy(configPath, backupConfigPath, true);
+        //            }
+
+        //            // 更智能的复制逻辑，带过滤覆盖文件
+        //            string batContent = $@"
+        //            @echo off
+        //            title 更新中，请勿关闭...
+        //            chcp 65001 >nul
+
+        //            echo 正在应用更新...
+
+        //            REM 遍历解压目录，排除配置文件
+        //            for /f ""delims="" %%f in ('dir ""{extractPath}"" /b /s /a-d') do (
+        //                if /i not ""%%~nxf""==""{configFile}"" (
+        //                    set ""source=%%f""
+        //                    set ""dest={appDir}\%%~pnxf""
+
+        //                    REM 创建目标目录
+        //                    if not exist ""%%~dpf"" mkdir ""%%~dpf""
+
+        //                    REM 复制文件
+        //                    copy /y ""%%f"" ""{configFile}"" >nul 2>&1
+        //                )
+        //            )
+
+        //            REM 恢复配置文件
+        //            if exist ""{backupConfigPath}"" (
+        //                copy /y ""{backupConfigPath}"" ""{configPath}"" >nul 2>&1
+        //            )
+
+        //            echo {newVersion} > ""{appDir}\version.txt""
+
+        //            echo 更新完成，正在重启程序...
+        //            start """" /d ""{appDir}"" ""{exeName}""
+
+        //            REM 延迟一秒确保程序启动
+        //            timeout /t 1 /nobreak >nul
+
+        //            REM 清理临时文件
+        //            rd /s /q ""{tempDir}"" >nul 2>&1
+        //            exit";
+        //            //string batContent = $@"
+        //            //@echo off
+        //            //title 更新中，请勿关闭...
+        //            //timeout /t 2 /nobreak >nul
+        //            //xcopy ""{extractPath}\*.*"" ""{appDir}\"" /s /e /y /q /i /h
+        //            //echo {newVersion} > ""{appDir}\version.txt""
+        //            //start """" /d ""{appDir}"" ""{exeName}""
+        //            //rd /s /q ""{tempDir}""
+        //            //exit";
+
+        //            File.WriteAllText(batPath, batContent);
+
+        //            // 5. 启动 bat
+        //            Process.Start(new ProcessStartInfo
+        //            {
+        //                FileName = batPath,
+        //                UseShellExecute = true,
+        //                CreateNoWindow = true,
+        //                WindowStyle = ProcessWindowStyle.Hidden
+        //            });
+
+        //            // 6. 关闭进度窗并退出
+        //            progressForm.Invoke(() =>
+        //            {
+        //                progressForm.Complete("更新完成，正在重启程序...");
+        //                Application.Exit();
+        //            });
+        //        });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        // 失败处理不变...
+        //    }
+        //}
 
         /// <summary>
         /// 处理可用更新

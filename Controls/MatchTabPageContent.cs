@@ -1,8 +1,9 @@
-﻿using System.ComponentModel;
-using System.Diagnostics;
-using League.Controls;
+﻿using League.Controls;
 using League.Models;
+using League.States;
 using Newtonsoft.Json.Linq;
+using System.ComponentModel;
+using System.Diagnostics;
 
 namespace League.uitls
 {
@@ -28,6 +29,21 @@ namespace League.uitls
         // 1. 添加一个字段，保存当前正在解析的任务（可选但推荐）
         private Task _currentParsingTask;  // 新增这行
 
+        // 新增字段：跟踪已加载的图片资源
+        private List<Image> _loadedImages = new List<Image>();
+
+        // 新增字段：用于深度清理
+        private List<WeakReference> _allParsedPanels = new List<WeakReference>();
+        private Dictionary<string, object> _parsedDataCache = new Dictionary<string, object>();
+
+        private bool _needsRefresh = false;
+        private DateTime _lastRefreshTime = DateTime.MinValue;
+        private readonly TimeSpan _minimumRefreshInterval = TimeSpan.FromSeconds(2); // 最小刷新间隔                                               
+        private bool _isRefreshing = false; // 添加标志防止递归
+
+        // 添加属性和方法
+        public bool NeedsRefresh => _needsRefresh;
+
         public MatchTabPageContent()
         {
             InitializeComponent();
@@ -48,8 +64,45 @@ namespace League.uitls
             //初始化数据绑定
             InitComboBoxes();
             WireEvents();
+        }
 
-            
+        public void SetNeedsRefresh(bool needsRefresh)
+        {
+            _needsRefresh = needsRefresh;
+        }
+
+        // 🔥 新增 ForceCleanup 方法
+        public void ForceCleanup()
+        {
+            // 停止所有异步操作
+            _updateCts?.Cancel();
+
+            // 等待任务完成（最多等待 1 秒）
+            if (_currentParsingTask != null && !_currentParsingTask.IsCompleted)
+            {
+                try
+                {
+                    _currentParsingTask.Wait(TimeSpan.FromSeconds(1));
+                }
+                catch { }
+            }
+
+            // 清理图片资源
+            DisposeAllImages();
+
+            // 清理 JSON 数据
+            if (_currentMatches != null)
+            {
+                try
+                {
+                    _currentMatches.RemoveAll();
+                }
+                catch { }
+                _currentMatches = null;
+            }
+
+            // 调用原有的 Cleanup
+            Cleanup();
         }
 
         private bool _disposed;
@@ -203,59 +256,22 @@ namespace League.uitls
             }
         }
 
-        //private async Task UpdateMatchListInternal(JArray matches, CancellationToken token)
-        //{
-        //    var panels = await Task.Run(async () =>
-        //    {
-        //        var panelList = new List<Panel>();
-        //        Debug.WriteLine("进入解析环节！");
-        //        int num = 1;
-        //        var tasks = matches.Cast<JObject>()
-        //            .Select(match => ParsePanelRequested?.Invoke(match, _puuid, num++))
-        //            .ToList();
-
-        //        foreach (var t in tasks)
-        //        {
-        //            if (token.IsCancellationRequested) break;
-        //            var panel = await t.ConfigureAwait(false);
-        //            if (panel != null) panelList.Add(panel);
-        //        }
-
-        //        return panelList;
-        //    });
-
-        //    SafeInvoke(flowLayoutPanelRight, () =>
-        //    {
-        //        flowLayoutPanelRight.SuspendLayout();
-        //        try
-        //        {
-        //            foreach (Control control in flowLayoutPanelRight.Controls)
-        //            {
-        //                if (control is IDisposable disposable) disposable.Dispose();
-        //            }
-        //            flowLayoutPanelRight.Controls.Clear();
-        //            flowLayoutPanelRight.Controls.AddRange(panels.ToArray());
-        //        }
-        //        finally
-        //        {
-        //            flowLayoutPanelRight.ResumeLayout(true);
-        //        }
-        //    });
-        //}
-        // 2. 修改 UpdateMatchListInternal：在 foreach await 时捕获取消异常
+        
+        // 修改 UpdateMatchListInternal 方法，跟踪解析的面板
         private async Task UpdateMatchListInternal(JArray matches, CancellationToken token)
         {
+            // 先清理旧的
+            CleanupAllParsedPanels();
+
             var panels = await Task.Run(async () =>
             {
                 var panelList = new List<Panel>();
-                //Debug.WriteLine("进入解析环节！");
                 int num = 1;
                 var tasks = matches.Cast<JObject>()
                     .Select(match => ParsePanelRequested?.Invoke(match, _puuid, num++))
                     .ToList();
 
-                // 保存当前解析任务（用于 Cleanup 时等待）
-                _currentParsingTask = Task.WhenAll(tasks);  // 新增这行
+                _currentParsingTask = Task.WhenAll(tasks);
 
                 foreach (var t in tasks)
                 {
@@ -264,29 +280,35 @@ namespace League.uitls
                     try
                     {
                         var panel = await t.ConfigureAwait(false);
-                        if (panel != null) panelList.Add(panel);
+                        if (panel != null)
+                        {
+                            panelList.Add(panel);
+                            _allParsedPanels.Add(new WeakReference(panel)); // 🔥 跟踪
+                        }
                     }
-                    catch (OperationCanceledException)  // 或 catch (TaskCanceledException)
+                    catch (OperationCanceledException)
                     {
-                        // 被取消了，正常情况，直接跳出
                         break;
                     }
                 }
 
-                _currentParsingTask = null;  // 新增：任务结束清空引用
+                _currentParsingTask = null;
                 return panelList;
-            }, token);  // 建议加上 token，让 Task.Run 也能响应取消
+            }, token);
 
             SafeInvoke(flowLayoutPanelRight, () =>
             {
                 flowLayoutPanelRight.SuspendLayout();
                 try
                 {
+                    // 先清理旧的
                     foreach (Control control in flowLayoutPanelRight.Controls)
                     {
                         if (control is IDisposable disposable) disposable.Dispose();
                     }
                     flowLayoutPanelRight.Controls.Clear();
+
+                    // 添加新的
                     flowLayoutPanelRight.Controls.AddRange(panels.ToArray());
                 }
                 finally
@@ -295,6 +317,7 @@ namespace League.uitls
                 }
             });
         }
+
 
         public async Task SafeInitializeAsync(string puuid)
         {
@@ -310,37 +333,297 @@ namespace League.uitls
 
         public async Task InitiaRank(string fullName, string profileIconId, string summonerLevel, string privacy, Dictionary<string, RankedStats> rankedStats)
         {
-            linkGameName.Text = fullName;
-            lblLevel.Text = $"等级：【{summonerLevel}】";
-            lblPrivacy.Text = $"隐私：【{privacy}】";
-            picChampionId.Image = await Profileicon.GetProfileIconAsync(int.Parse(profileIconId));
-
-            // 检查数据是否存在
-            if (rankedStats == null) return;
-
-            // 访问单双排数据（安全访问）
-            if (rankedStats.TryGetValue("单双排", out var soloStats))
+            // 检查是否在UI线程
+            if (this.InvokeRequired)
             {
-                lblSoloTier.Text = soloStats.FormattedTier;      // 段位
-                lblSoloGames.Text = $"{soloStats.TotalGames} 场";    //场次
-                lblSoloWins.Text = $"{soloStats.Wins}场";  //胜场
-                lblSoloLosses.Text = $"{soloStats.Losses}场";  //负场
-                lblSoloWinRate.Text = $"{soloStats.WinRateDisplay}%";  //胜率
-                //lblSoloWinRate.Text = $"{soloStats.WinRate}%";  //胜率
-                lblSoloLeaguePoints.Text = $"{soloStats.LeaguePoints}点";  //胜点
+                // 使用异步方式，避免死锁
+                await Task.Run(async () =>
+                    await InitiaRank(fullName, profileIconId, summonerLevel, privacy, rankedStats));
+                return;
             }
 
-            // 访问灵活组排数据
-            if (rankedStats.TryGetValue("灵活组排", out var flexStats))
+            try
             {
-                lblFlexTier.Text = flexStats.FormattedTier;      // 段位
-                lblFlexGames.Text = $"{flexStats.TotalGames} 场";    //场次
-                lblFlexWins.Text = $"{flexStats.Wins}场";  //胜场
-                lblFlexLosses.Text = $"{flexStats.Losses}场";  //负场
-                lblFlexWinRate.Text = $"{flexStats.WinRateDisplay}%";  //胜率胜率
-                //lblFlexWinRate.Text = $"{flexStats.WinRate}%";  //胜率胜率
-                lblFlexLeaguePoints.Text = $"{flexStats.LeaguePoints}点";  //胜点
+                linkGameName.Text = fullName;
+                lblLevel.Text = $"等级：【{summonerLevel}】";
+                lblPrivacy.Text = $"隐私：【{privacy}】";
+
+                // 只在头像ID不同时才更新图片
+                if (int.TryParse(profileIconId, out int iconId))
+                {
+                    // 获取当前头像ID（如果有的话）
+                    int currentIconId = GetCurrentProfileIconId();
+
+                    // 只有当头像ID不同时才更新
+                    if (currentIconId != iconId)
+                    {
+                        await UpdateProfileIcon(iconId);
+                    }
+                }
+
+                // 检查数据是否存在
+                if (rankedStats == null) return;
+
+                // 访问单双排数据（安全访问）
+                if (rankedStats.TryGetValue("单双排", out var soloStats))
+                {
+                    lblSoloTier.Text = soloStats.FormattedTier;
+                    lblSoloGames.Text = $"{soloStats.TotalGames} 场";
+                    lblSoloWins.Text = $"{soloStats.Wins}场";
+                    lblSoloLosses.Text = $"{soloStats.Losses}场";
+                    lblSoloWinRate.Text = $"{soloStats.WinRateDisplay}%";
+                    lblSoloLeaguePoints.Text = $"{soloStats.LeaguePoints}点";
+                }
+
+                // 访问灵活组排数据
+                if (rankedStats.TryGetValue("灵活组排", out var flexStats))
+                {
+                    lblFlexTier.Text = flexStats.FormattedTier;
+                    lblFlexGames.Text = $"{flexStats.TotalGames} 场";
+                    lblFlexWins.Text = $"{flexStats.Wins}场";
+                    lblFlexLosses.Text = $"{flexStats.Losses}场";
+                    lblFlexWinRate.Text = $"{flexStats.WinRateDisplay}%";
+                    lblFlexLeaguePoints.Text = $"{flexStats.LeaguePoints}点";
+                }
             }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[InitiaRank异常] {ex.Message}");
+            }
+        }
+
+        // 修改 ForceRefreshData 方法，添加防重复调用检查
+        public async Task ForceRefreshData(string puuid)
+        {
+            if (string.IsNullOrEmpty(puuid) || !string.Equals(puuid, _puuid, StringComparison.OrdinalIgnoreCase))
+            {
+                Debug.WriteLine($"[ForceRefreshData] PUUID不匹配: 传入={puuid}, 当前={_puuid}");
+                return;
+            }
+
+            // 🔥 防止重复调用：检查时间间隔
+            if ((DateTime.Now - _lastRefreshTime) < _minimumRefreshInterval)
+            {
+                Debug.WriteLine($"[ForceRefreshData] 距离上次刷新时间太短，跳过本次刷新");
+                return;
+            }
+
+            // 🔥 防止递归：设置正在刷新标志
+            if (_isRefreshing)
+            {
+                Debug.WriteLine($"[ForceRefreshData] 已经在刷新中，跳过重复调用");
+                return;
+            }
+
+            _isRefreshing = true;
+            _lastRefreshTime = DateTime.Now;
+
+            try
+            {
+                Debug.WriteLine($"[ForceRefreshData] 开始强制刷新数据，PUUID: {puuid}");
+
+                // 确保在UI线程上执行
+                if (this.InvokeRequired)
+                {
+                    await Task.Run(async () =>
+                    {
+                        _isRefreshing = true;
+                        await ForceRefreshDataInternal(puuid);
+                    });
+                    return;
+                }
+
+                await ForceRefreshDataInternal(puuid);
+
+                Debug.WriteLine($"[ForceRefreshData] 强制刷新完成，PUUID: {puuid}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ForceRefreshData异常] {ex.Message}");
+            }
+            finally
+            {
+                _isRefreshing = false;
+            }
+        }
+
+        // 分离出实际的刷新逻辑
+        private async Task ForceRefreshDataInternal(string puuid)
+        {
+            // 重置页面状态
+            _currentPage = 1;
+
+            // 清理缓存
+            if (_currentMatches != null)
+            {
+                try
+                {
+                    _currentMatches.RemoveAll();
+                    _currentMatches = null;
+                }
+                catch { }
+            }
+
+            // 清理UI控件
+            SafeInvoke(() =>
+            {
+                flowLayoutPanelRight.SuspendLayout();
+                try
+                {
+                    // 清理所有面板
+                    var controls = flowLayoutPanelRight.Controls.OfType<Control>().ToList();
+                    foreach (Control control in controls)
+                    {
+                        if (control is IDisposable disposable)
+                            disposable.Dispose();
+                    }
+                    flowLayoutPanelRight.Controls.Clear();
+                }
+                finally
+                {
+                    flowLayoutPanelRight.ResumeLayout(true);
+                }
+            });
+
+            // 重置强制刷新状态，避免后续重复刷新
+            RefreshState.ForceMatchRefresh = false;
+
+            // 重新加载数据
+            await LoadDataAsync(true);
+        }
+
+        // 辅助方法：获取当前头像ID
+        private int GetCurrentProfileIconId()
+        {
+            // 这里可以从Tag或其他地方存储当前头像ID
+            // 暂时返回-1表示没有当前头像
+            if (picChampionId.Tag != null && int.TryParse(picChampionId.Tag.ToString(), out int currentId))
+            {
+                return currentId;
+            }
+            return -1;
+        }
+
+        // 辅助方法：更新头像
+        //private async Task UpdateProfileIcon(int iconId)
+        //{
+        //    try
+        //    {
+        //        // 清理旧图片
+        //        if (picChampionId.Image != null)
+        //        {
+        //            var oldImage = picChampionId.Image;
+        //            picChampionId.Image = null;
+
+        //            // 延迟释放，避免立即释放导致的问题
+        //            _ = Task.Delay(100).ContinueWith(_ =>
+        //            {
+        //                try
+        //                {
+        //                    oldImage?.Dispose();
+        //                }
+        //                catch { }
+        //            });
+        //        }
+
+        //        // 加载新图片
+        //        var image = await Profileicon.GetProfileIconAsync(iconId);
+        //        if (image != null)
+        //        {
+        //            picChampionId.Image = image;
+        //            picChampionId.Tag = iconId.ToString(); // 保存当前头像ID
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Debug.WriteLine($"[更新头像异常] {ex.Message}");
+        //    }
+        //}
+        private async Task UpdateProfileIcon(int iconId)
+        {
+            if (iconId <= 0) return;
+
+            try
+            {
+                Image? newImage = null;
+                try
+                {
+                    newImage = await Profileicon.GetProfileIconAsync(iconId);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GetProfileIconAsync异常] {ex.Message}");
+                }
+
+                if (newImage == null) return;
+
+                SafeInvoke(() =>
+                {
+                    try
+                    {
+                        var oldImage = picChampionId.Image;
+                        picChampionId.Image = newImage;
+                        picChampionId.Tag = iconId.ToString();
+
+                        if (oldImage != null && oldImage != newImage)
+                        {
+                            oldImage.Dispose();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[UpdateProfileIcon UI异常] {ex.Message}");
+                        // 最后兜底
+                        try { picChampionId.Image = new Bitmap(Profileicon.GetDefaultImageSafe() as Bitmap ?? new Bitmap(64, 64)); } catch { }
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[UpdateProfileIcon 外层异常] {ex.Message}");
+            }
+        }
+
+        // 🔥 清理所有图片资源的方法
+        private void DisposeAllImages()
+        {
+            SafeInvoke(() =>
+            {
+                // 清理 profile icon
+                if (picChampionId.Image != null)
+                {
+                    try
+                    {
+                        picChampionId.Image.Dispose();
+                    }
+                    catch { }
+                    picChampionId.Image = null;
+                }
+
+                // 清理已跟踪的图片
+                foreach (var image in _loadedImages)
+                {
+                    try
+                    {
+                        image?.Dispose();
+                    }
+                    catch { }
+                }
+                _loadedImages.Clear();
+
+                // 递归清理 flowLayoutPanelRight 中的所有图片
+                foreach (Control control in flowLayoutPanelRight.Controls)
+                {
+                    if (control is MatchListPanel matchPanel)
+                    {
+                        try
+                        {
+                            matchPanel.DisposeImages();
+                        }
+                        catch { }
+                    }
+                }
+            });
         }
 
         private async Task OnPrevPage()
@@ -537,102 +820,157 @@ namespace League.uitls
             });
         }
 
-        //public void Cleanup()
-        //{
-        //    Debug.WriteLine($"[清理] MatchTabPageContent清理开始");
-
-        //    // 1. 取消所有异步操作
-        //    _updateCts?.Cancel();
-        //    _updateCts?.Dispose();
-        //    _updateCts = null;
-
-        //    // 2. 清理所有Panel及其资源
-        //    SafeInvoke(() =>
-        //    {
-        //        foreach (Control control in flowLayoutPanelRight.Controls)
-        //        {
-        //            if (control is MatchListPanel matchPanel)
-        //            {
-        //                // 清理MatchInfo中的资源
-        //                if (matchPanel.MatchInfo != null)
-        //                {
-        //                    // 释放原始JSON数据
-        //                    matchPanel.MatchInfo.RawGameData?.RemoveAll();
-        //                    matchPanel.MatchInfo.RawGameData = null;
-        //                    matchPanel.MatchInfo.AllParticipants?.Clear();
-        //                    matchPanel.MatchInfo.AllParticipants = null;
-        //                }
-        //            }
-        //            control.Dispose();
-        //        }
-        //        flowLayoutPanelRight.Controls.Clear();
-        //    });
-
-        //    // 3. 清理事件
-        //    LoadDataRequested = null;
-        //    ParsePanelRequested = null;
-
-        //    // 5. 强制GC
-        //    GC.Collect();
-        //    GC.WaitForPendingFinalizers();
-
-        //    Debug.WriteLine($"[清理] MatchTabPageContent清理完成");
-        //}
-
-        // 3. 修改 Cleanup()：等待正在解析的任务结束（关键！彻底消除异常）
+        // 修改 Cleanup 方法，增加深度清理
         public void Cleanup()
         {
-            //Debug.WriteLine($"[清理] MatchTabPageContent清理开始");
+            Debug.WriteLine($"[深度清理] MatchTabPageContent 开始清理，PUUID: {_puuid}");
 
-            // 取消正在进行的操作
+            // 1. 取消所有异步操作
             _updateCts?.Cancel();
 
-            // 关键：等待当前正在解析的面板任务结束（如果有）
+            // 2. 等待当前解析任务完成（最多500ms）
             if (_currentParsingTask != null && !_currentParsingTask.IsCompleted)
             {
                 try
                 {
-                    // 同步等待（在 Dispose 中可以接受，不会死锁）
-                    _currentParsingTask.GetAwaiter().GetResult();
-                }
-                catch (OperationCanceledException)
-                {
-                    // 预期中的取消，忽略
+                    bool completed = _currentParsingTask.Wait(500);
+                    if (!completed)
+                    {
+                        Debug.WriteLine($"[清理] 解析任务未在500ms内完成，强制继续清理");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("[Cleanup 等待任务异常]" + ex);
+                    Debug.WriteLine($"[清理等待异常] {ex.Message}");
                 }
             }
 
-            _updateCts?.Dispose();
-            _updateCts = null;
+            // 3. 清理所有图片资源
+            DisposeAllImages();
 
-            // 清理 UI
+            // 4. 清理 JSON 数据
+            if (_currentMatches != null)
+            {
+                try
+                {
+                    // 深度清理JSON对象
+                    DeepCleanJArray(_currentMatches);
+                    _currentMatches = null;
+                }
+                catch { }
+            }
+
+            // 5. 清理所有已解析的面板
+            CleanupAllParsedPanels();
+
+            // 6. 清理数据缓存
+            _parsedDataCache.Clear();
+
+            // 7. 清理UI控件
             SafeInvoke(() =>
             {
-                foreach (Control control in flowLayoutPanelRight.Controls)
+                try
                 {
-                    if (control is MatchListPanel matchPanel && matchPanel.MatchInfo != null)
+                    // 获取副本，避免修改集合时遍历
+                    var controls = flowLayoutPanelRight.Controls.OfType<Control>().ToList();
+                    foreach (var control in controls)
                     {
-                        matchPanel.MatchInfo.RawGameData?.RemoveAll();
-                        matchPanel.MatchInfo.RawGameData = null;
-                        matchPanel.MatchInfo.AllParticipants?.Clear();
-                        matchPanel.MatchInfo.AllParticipants = null;
+                        if (control is MatchListPanel matchPanel)
+                        {
+                            // 深度清理MatchListPanel
+                            matchPanel.DeepClean();
+                        }
+                        control.Dispose();
                     }
-                    control.Dispose();
+                    flowLayoutPanelRight.Controls.Clear();
                 }
-                flowLayoutPanelRight.Controls.Clear();
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[UI清理异常] {ex.Message}");
+                }
             });
 
+            // 8. 清理事件引用
             LoadDataRequested = null;
             ParsePanelRequested = null;
 
-            // GC 强制收集可保留也可去掉（建议去掉，没必要）
-            // GC.Collect();
-            // GC.WaitForPendingFinalizers();
+            // 9. 清理下拉框事件
+            if (asyncComboPageChangedHandler != null)
+            {
+                comboPage.SelectedIndexChanged -= asyncComboPageChangedHandler;
+                asyncComboPageChangedHandler = null;
+            }
 
-            //Debug.WriteLine($"[清理] MatchTabPageContent清理完成");
+            // 10. 清理委托缓存
+            _currentParsingTask = null;
+            _puuid = null;
+
+            // 11. 清理弱引用列表
+            _allParsedPanels.Clear();
+
+            // 12. 通知GC
+            GC.Collect(0, GCCollectionMode.Forced);
+            GC.WaitForPendingFinalizers();
+
+            Debug.WriteLine($"[深度清理] MatchTabPageContent 清理完成");
+        }
+
+        // 🔥 新增：深度清理JArray
+        private void DeepCleanJArray(JArray array)
+        {
+            if (array == null) return;
+
+            try
+            {
+                // 遍历所有JObject
+                foreach (var item in array)
+                {
+                    if (item is JObject obj)
+                    {
+                        DeepCleanJObject(obj);
+                    }
+                }
+                array.RemoveAll();
+            }
+            catch { }
+        }
+
+        // 🔥 新增：深度清理JObject
+        private void DeepCleanJObject(JObject obj)
+        {
+            if (obj == null) return;
+
+            try
+            {
+                // 移除所有属性
+                var properties = obj.Properties().ToList();
+                foreach (var prop in properties)
+                {
+                    prop.Remove();
+                }
+            }
+            catch { }
+        }
+
+        // 🔥 新增：清理所有已解析的面板
+        private void CleanupAllParsedPanels()
+        {
+            foreach (var weakRef in _allParsedPanels)
+            {
+                if (weakRef.IsAlive && weakRef.Target is Panel panel)
+                {
+                    try
+                    {
+                        if (panel is MatchListPanel matchPanel)
+                        {
+                            matchPanel.DeepClean();
+                        }
+                        panel.Dispose();
+                    }
+                    catch { }
+                }
+            }
+            _allParsedPanels.Clear();
         }
 
         #region 公共属性

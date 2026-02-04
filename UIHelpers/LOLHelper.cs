@@ -1,127 +1,184 @@
 ﻿using Microsoft.Win32;
+using Newtonsoft.Json;
 using System.Diagnostics;
+using System.IO;
 
 namespace League.UIHelpers
 {
     public class LOLHelper
     {
-        /// <summary>
-        /// 自动检测 LOL 登录程序路径
-        /// </summary>
-        /// <returns>若找到则返回 exe 完整路径，否则返回 null</returns>
-        public string GetLOLLoginExePath()
+        private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "LOLPathConfig.json");
+
+        public void SaveCustomPath(string exePath)
         {
-            // 1. 尝试从注册表读取
-            string installPath = GetLOLInstallPathFromRegistry();
-            if (!string.IsNullOrEmpty(installPath))
+            try
             {
-                var exe = FindLauncherExe(installPath);
-                if (exe != null)
-                    return exe;
+                File.WriteAllText(ConfigPath, JsonConvert.SerializeObject(new { LastLOLPath = exePath }, Formatting.Indented));
+            }
+            catch { }
+        }
+
+        private string LoadCustomPath()
+        {
+            try
+            {
+                if (File.Exists(ConfigPath))
+                {
+                    var config = JsonConvert.DeserializeObject<dynamic>(File.ReadAllText(ConfigPath));
+                    return config?.LastLOLPath?.ToString();
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// 获取官方客户端启动路径（Launcher / TCLS）
+        /// </summary>
+        public string GetOfficialLauncherPath()
+        {
+            string custom = LoadCustomPath();
+            if (!string.IsNullOrEmpty(custom) && File.Exists(custom))
+                return custom;
+
+            return SearchFixedSubDirs(new[] { "Launcher", "TCLS" });
+        }
+
+        /// <summary>
+        /// 获取 WeGame 启动路径
+        /// </summary>
+        public string GetWeGameLauncherPath()
+        {
+            return SearchFixedSubDirs(new[] { "WeGameLauncher" });
+        }
+
+        /// <summary>
+        /// 全盘搜索固定子目录
+        /// </summary>
+        private string SearchFixedSubDirs(string[] targetSubDirs)
+        {
+            try
+            {
+                string[] drives = Directory.GetLogicalDrives();
+
+                foreach (var drive in drives)
+                {
+                    try
+                    {
+                        var result = SearchDirectory(drive, targetSubDirs, maxDepth: 4); // 限制深度，避免太慢
+                        if (!string.IsNullOrEmpty(result))
+                            return result;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private string SearchDirectory(string currentDir, string[] targetSubDirs, int maxDepth, int currentDepth = 0)
+        {
+            if (currentDepth > maxDepth) return null;
+
+            try
+            {
+                // 检查当前目录下是否有目标子目录
+                foreach (var subDirName in targetSubDirs)
+                {
+                    string subPath = Path.Combine(currentDir, subDirName);
+                    if (Directory.Exists(subPath))
+                    {
+                        string exe = FindExeInSubDir(subPath, subDirName);
+                        if (!string.IsNullOrEmpty(exe))
+                            return exe;
+                    }
+                }
+
+                // 继续搜索下一级目录
+                foreach (var dir in Directory.GetDirectories(currentDir))
+                {
+                    // 跳过常见大目录，加快搜索
+                    string dirName = Path.GetFileName(dir)?.ToLower() ?? "";
+                    if (dirName.Contains("windows") || dirName.Contains("appdata") || dirName.Contains("$"))
+                        continue;
+
+                    string found = SearchDirectory(dir, targetSubDirs, maxDepth, currentDepth + 1);
+                    if (!string.IsNullOrEmpty(found))
+                        return found;
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private string FindExeInSubDir(string subDir, string subDirName)
+        {
+            if (subDirName == "WeGameLauncher")
+            {
+                string exe = Path.Combine(subDir, "launcher.exe");
+                return File.Exists(exe) ? exe : null;
             }
 
-            // 2. 如果注册表没有，就遍历常用盘符
-            string[] drives = Directory.GetLogicalDrives();
-            foreach (var drive in drives)
+            // Launcher 和 TCLS
+            string[] candidates = subDirName == "TCLS"
+                ? new[] { "client.exe" }
+                : new[] { "startup_runner.exe", "Client.exe" };
+
+            foreach (var exeName in candidates)
             {
-                var exe = SearchLauncherExeInDrive(drive);
-                if (exe != null)
-                    return exe;
+                string fullPath = Path.Combine(subDir, exeName);
+                if (File.Exists(fullPath))
+                    return fullPath;
             }
 
             return null;
         }
 
-        private string GetLOLInstallPathFromRegistry()
+        private string GetFromRegistry()
         {
-            string[] possibleKeys =
+            // 注册表作为最后兜底
+            string[] keys =
             {
                 @"SOFTWARE\WOW6432Node\Tencent\LOL",
                 @"SOFTWARE\WOW6432Node\Tencent\英雄联盟"
             };
 
-            foreach (var key in possibleKeys)
+            foreach (var key in keys)
             {
-                using (RegistryKey regKey = Registry.LocalMachine.OpenSubKey(key))
+                using var reg = Registry.LocalMachine.OpenSubKey(key);
+                if (reg != null)
                 {
-                    if (regKey != null)
+                    var path = reg.GetValue("Path")?.ToString() ?? reg.GetValue("InstallPath")?.ToString();
+                    if (!string.IsNullOrEmpty(path))
                     {
-                        var value = regKey.GetValue("Path");
-                        if (value != null)
-                        {
-                            string path = value.ToString();
-                            if (Directory.Exists(path))
-                                return path;
-                        }
+                        string exe = FindExeInSubDir(Path.Combine(path, "Launcher"), "Launcher");
+                        if (!string.IsNullOrEmpty(exe)) return exe;
                     }
                 }
             }
             return null;
         }
 
-        private string FindLauncherExe(string installPath)
+        public void StartOfficialClient() => StartProcess(GetOfficialLauncherPath());
+        public void StartWeGameClient() => StartProcess(GetWeGameLauncherPath());
+
+        private void StartProcess(string exePath)
         {
-            string launcherDir = Path.Combine(installPath, "Launcher");
-            if (Directory.Exists(launcherDir))
+            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
             {
-                string exe1 = Path.Combine(launcherDir, "startup_runner.exe");
-                if (File.Exists(exe1))
-                    return exe1;
-
-                string exe2 = Path.Combine(launcherDir, "Client.exe");
-                if (File.Exists(exe2))
-                    return exe2;
+                MessageBox.Show("未找到启动程序，请检查游戏目录或手动启动。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
-            return null;
-        }
 
-        private string SearchLauncherExeInDrive(string driveRoot)
-        {
             try
             {
-                // 在该盘根目录下查找名为 "英雄联盟" 的文件夹
-                string programFilesX86 = Path.Combine(driveRoot, "Program Files (x86)");
-                if (Directory.Exists(programFilesX86))
-                {
-                    var dirs = Directory.GetDirectories(programFilesX86, "*英雄联盟*");
-                    foreach (var dir in dirs)
-                    {
-                        var exe = FindLauncherExe(dir);
-                        if (exe != null)
-                            return exe;
-                    }
-                }
-                // 再试试直接在盘符根目录下
-                var rootDirs = Directory.GetDirectories(driveRoot, "*英雄联盟*");
-                foreach (var dir in rootDirs)
-                {
-                    var exe = FindLauncherExe(dir);
-                    if (exe != null)
-                        return exe;
-                }
+                Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
             }
             catch
             {
-                // 忽略权限异常
-            }
-
-            return null;
-        }
-
-
-        /// <summary>
-        /// 启动 LOL 登录程序
-        /// </summary>
-        /// <param name="exePath">exe 完整路径</param>
-        public void StartLOLLoginProgram(string exePath)
-        {
-            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
-            {
-                Process.Start(exePath);
-            }
-            else
-            {
-                Console.WriteLine("未找到 LOL 登录程序！");
+                MessageBox.Show("启动失败，请手动启动客户端。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
     }

@@ -41,6 +41,14 @@ namespace League.Parsers
             long sid = playerData["summonerId"]?.Value<long>() ?? 0;
             int cid = playerData["championId"]?.Value<int>() ?? 0;
 
+            // 新增：优先处理隐藏玩家
+            string nameVisibility = playerData["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
+            if (nameVisibility == "HIDDEN" || sid == 0)
+            {
+                Debug.WriteLine($"[隐藏玩家优化] summonerId={sid}，nameVisibility={nameVisibility}，直接返回隐藏玩家占位");
+                return CreateHiddenPlayerInfo(sid, cid);
+            }
+
             for (int attempt = 1; attempt <= retryTimes + 1; attempt++)
             {
                 try
@@ -60,30 +68,54 @@ namespace League.Parsers
             }
 
             Debug.WriteLine($"[Fetch彻底失败] summonerId={sid}，显示查询失败卡片");
-
-            // 安全检查：如果 _playerCardManager 还没注入（极少情况），直接创建简单失败对象
-            if (_playerCardManager == null)
-            {
-                Debug.WriteLine("[警告] _playerCardManager 为 null，使用备用失败占位");
-                return new PlayerMatchInfo
-                {
-                    Player = new PlayerInfo
-                    {
-                        SummonerId = sid,
-                        ChampionId = cid,
-                        ChampionName = "查询失败",
-                        GameName = "失败",
-                        IsPublic = "[失败]",
-                        SoloRank = "失败",
-                        FlexRank = "失败",
-                        Avatar = Image.FromFile(AppDomain.CurrentDomain.BaseDirectory + "Assets\\Defaults\\Profile.png")
-                    },
-                    MatchItems = new List<ListViewItem>(),
-                    HeroIcons = new ImageList()
-                };
-            }
-
+            // 对于普通玩家失败，创建失败卡片
             return _playerCardManager.CreateFailedPlayerInfo(sid, cid);
+        }
+
+        /// <summary>
+        /// 创建隐藏玩家信息（专为summonerId=0或HIDDEN状态玩家）
+        /// </summary>
+        private PlayerMatchInfo CreateHiddenPlayerInfo(long summonerId, int championId)
+        {
+            // 获取英雄信息
+            string championName = GetChampionName(championId);
+            Image championIcon = Task.Run(() => GetChampionIconAsync(championId)).Result ??
+                                LoadDefaultImage();
+
+            return new PlayerMatchInfo
+            {
+                Player = new PlayerInfo
+                {
+                    SummonerId = summonerId,
+                    ChampionId = championId,
+                    ChampionName = championName,
+                    Avatar = championIcon,
+                    GameName = "隐藏玩家",
+                    SoloRank = "隐藏",
+                    FlexRank = "隐藏",
+                    IsPublic = "隐藏",
+                    NameColor = Color.Gray // 隐藏玩家显示为灰色
+                },
+                MatchItems = new List<ListViewItem>(),
+                HeroIcons = new ImageList()
+            };
+        }
+
+        /// <summary>
+        /// 加载默认图片
+        /// </summary>
+        private Image LoadDefaultImage()
+        {
+            try
+            {
+                var path = AppDomain.CurrentDomain.BaseDirectory + "Assets\\Defaults\\Profile.png";
+                if (File.Exists(path))
+                    return Image.FromFile(path);
+            }
+            catch { }
+
+            // 创建简单的灰色占位图
+            return new Bitmap(64, 64);
         }
 
         /// <summary>
@@ -98,28 +130,18 @@ namespace League.Parsers
             string puuid = playerData["puuid"]?.ToString() ?? "";
             int championId = playerData["championId"]?.Value<int>() ?? 0;
 
-            // 新增：优先判断是否为隐藏玩家（最快路径）
+            // 新增：更严格的隐藏玩家判断
             string nameVisibility = playerData["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
-            if (nameVisibility == "HIDDEN" || summonerId == 0)
-            {
-                Debug.WriteLine($"[隐藏玩家] 检测到隐藏/obfuscated玩家，summonerId={summonerId}，直接返回占位 (championId={championId})");
+            bool isHidden = nameVisibility == "HIDDEN" ||
+                           string.IsNullOrEmpty(puuid) ||
+                           summonerId == 0 ||
+                           puuid.StartsWith("OBFUSCATED_") ||
+                           puuid.StartsWith("HIDDEN_");
 
-                return new PlayerMatchInfo
-                {
-                    Player = new PlayerInfo
-                    {
-                        SummonerId = 0,
-                        ChampionId = championId,
-                        ChampionName = GetChampionName(championId),
-                        Avatar = await GetChampionIconAsync(championId),
-                        GameName = "隐藏玩家",
-                        SoloRank = "隐藏",
-                        FlexRank = "隐藏",
-                        IsPublic = "隐藏"
-                    },
-                    MatchItems = new List<ListViewItem>(),
-                    HeroIcons = new ImageList()
-                };
+            if (isHidden)
+            {
+                Debug.WriteLine($"[隐藏玩家详细] summonerId={summonerId}, puuid={puuid}, nameVisibility={nameVisibility}");
+                return CreateHiddenPlayerInfo(summonerId, championId);
             }
 
             // 非隐藏玩家：先查缓存（加速常见情况）
@@ -201,54 +223,12 @@ namespace League.Parsers
                     ChampionName = GetChampionName(championId),
                     Avatar = await GetChampionIconAsync(championId),
                     GameName = "隐藏玩家",
-                    SoloRank = "隐藏玩家",
-                    FlexRank = "隐藏玩家",
-                    IsPublic = "[失败]"
+                    SoloRank = "隐藏",
+                    FlexRank = "隐藏",
+                    IsPublic = "隐藏"
                 },
                 MatchItems = new List<ListViewItem>(),
                 HeroIcons = new ImageList()
-            };
-        }
-
-        /// <summary>
-        /// 获取玩家基础信息
-        /// </summary>
-        private async Task<PlayerInfo> GetPlayerBasicInfoAsync(long summonerId, int championId)
-        {
-            var summoner = await Globals.lcuClient.GetGameNameBySummonerId(summonerId.ToString());
-            if (summoner == null)
-                return null;
-
-            string puuid = summoner["puuid"]?.ToString() ?? "";
-            string gameName = summoner["gameName"]?.ToString() ?? "未知玩家";
-
-            // 获取隐私状态
-            string privacyStatus = "隐藏";
-            if (summoner["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) ?? false)
-            {
-                privacyStatus = "公开";
-            }
-
-            // 获取段位信息
-            var rankedStats = await GetRankedStatsAsync(puuid);
-            string soloRank = GetFormattedRank(rankedStats, "单双排");
-            string flexRank = GetFormattedRank(rankedStats, "灵活组排");
-
-            // 获取英雄信息
-            string championName = GetChampionName(championId);
-            Image championIcon = await GetChampionIconAsync(championId);
-
-            return new PlayerInfo
-            {
-                Puuid = puuid,
-                SummonerId = summonerId,
-                ChampionId = championId,
-                ChampionName = championName,
-                Avatar = championIcon,
-                GameName = gameName,
-                IsPublic = privacyStatus,
-                SoloRank = soloRank,
-                FlexRank = flexRank
             };
         }
         #endregion
