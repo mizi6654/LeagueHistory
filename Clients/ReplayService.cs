@@ -154,7 +154,7 @@ namespace League.Clients
                             return true;
                         }
 
-                        if (state == "failed" || state == "error")
+                        if (state == "failed" || state == "error" || state == "incompatible")
                         {
                             Debug.WriteLine("[回放] 下载失败");
                             return false;

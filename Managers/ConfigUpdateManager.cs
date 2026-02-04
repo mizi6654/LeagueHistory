@@ -233,15 +233,63 @@ namespace League.Managers
                     string appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
                     string exeName = Path.GetFileName(Application.ExecutablePath);
 
+                    // 备份配置文件
+                    string configFile = "LeagueConfig.json";
+                    string configPath = Path.Combine(appDir, configFile);
+                    string backupConfigPath = Path.Combine(tempDir, "backup_" + configFile);
+
+                    if (File.Exists(configPath))
+                    {
+                        File.Copy(configPath, backupConfigPath, true);
+                    }
+
+                    // 更智能的复制逻辑，带过滤覆盖文件
                     string batContent = $@"
                     @echo off
                     title 更新中，请勿关闭...
-                    timeout /t 2 /nobreak >nul
-                    xcopy ""{extractPath}\*.*"" ""{appDir}\"" /s /e /y /q /i /h
+                    chcp 65001 >nul
+
+                    echo 正在应用更新...
+
+                    REM 遍历解压目录，排除配置文件
+                    for /f ""delims="" %%f in ('dir ""{extractPath}"" /b /s /a-d') do (
+                        if /i not ""%%~nxf""==""{configFile}"" (
+                            set ""source=%%f""
+                            set ""dest={appDir}\%%~pnxf""
+        
+                            REM 创建目标目录
+                            if not exist ""%%~dpf"" mkdir ""%%~dpf""
+        
+                            REM 复制文件
+                            copy /y ""%%f"" ""{configFile}"" >nul 2>&1
+                        )
+                    )
+
+                    REM 恢复配置文件
+                    if exist ""{backupConfigPath}"" (
+                        copy /y ""{backupConfigPath}"" ""{configPath}"" >nul 2>&1
+                    )
+
                     echo {newVersion} > ""{appDir}\version.txt""
+
+                    echo 更新完成，正在重启程序...
                     start """" /d ""{appDir}"" ""{exeName}""
-                    rd /s /q ""{tempDir}""
+
+                    REM 延迟一秒确保程序启动
+                    timeout /t 1 /nobreak >nul
+
+                    REM 清理临时文件
+                    rd /s /q ""{tempDir}"" >nul 2>&1
                     exit";
+                    //string batContent = $@"
+                    //@echo off
+                    //title 更新中，请勿关闭...
+                    //timeout /t 2 /nobreak >nul
+                    //xcopy ""{extractPath}\*.*"" ""{appDir}\"" /s /e /y /q /i /h
+                    //echo {newVersion} > ""{appDir}\version.txt""
+                    //start """" /d ""{appDir}"" ""{exeName}""
+                    //rd /s /q ""{tempDir}""
+                    //exit";
 
                     File.WriteAllText(batPath, batContent);
 

@@ -307,25 +307,44 @@ namespace League.Managers
             string soloRank = card.lblSoloRank.Text;
             string flexRank = card.lblFlexRank.Text;
             bool hasAvatar = card.picHero.Image != null;
+            long summonerId = card.CurrentSummonerId;
+
+            // 对于summonerId=0的隐藏玩家特殊处理
+            if (summonerId == 0)
+            {
+                // 隐藏玩家应该有特殊显示，而不是"查询失败"
+                if (playerName == "查询失败" || playerName == "失败")
+                {
+                    Debug.WriteLine($"[检查隐藏玩家] summonerId=0 显示为失败，需要修正为隐藏玩家");
+                    return true;
+                }
+
+                // 隐藏玩家可能有头像（皮肤头像），这没问题
+                // 如果是隐藏玩家且显示正常，不需要补全
+                if (playerName == "隐藏玩家" || playerName == "隐藏")
+                {
+                    return false;
+                }
+            }
 
             // 检查是否为查询失败
             if (playerName == "查询失败" || playerName == "失败")
             {
-                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 查询失败");
+                Debug.WriteLine($"[检查卡片] summonerId={summonerId} 查询失败");
                 return true;
             }
 
             // 检查是否为查询中
             if (playerName == "加载中..." || playerName.Contains("查询中"))
             {
-                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 查询中");
+                Debug.WriteLine($"[检查卡片] summonerId={summonerId} 查询中");
                 return true;
             }
 
-            // 检查是否缺少头像
-            if (!hasAvatar)
+            // 检查是否缺少头像（除了隐藏玩家）
+            if (!hasAvatar && summonerId != 0)
             {
-                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 缺少头像");
+                Debug.WriteLine($"[检查卡片] summonerId={summonerId} 缺少头像");
                 return true;
             }
 
@@ -333,15 +352,14 @@ namespace League.Managers
             if (soloRank == "失败" || soloRank == "加载中..." ||
                 flexRank == "失败" || flexRank == "加载中...")
             {
-                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 段位信息异常");
+                Debug.WriteLine($"[检查卡片] summonerId={summonerId} 段位信息异常");
                 return true;
             }
 
-            // 检查是否缺少战绩数据
-            if (card.ListViewControl.Items.Count == 0 &&
-                playerName != "隐藏玩家" && playerName != "隐藏")
+            // 检查是否缺少战绩数据（隐藏玩家可以没有战绩）
+            if (card.ListViewControl.Items.Count == 0 && summonerId != 0 && playerName != "隐藏玩家" && playerName != "隐藏")
             {
-                Debug.WriteLine($"[检查卡片] summonerId={card.CurrentSummonerId} 缺少战绩数据");
+                Debug.WriteLine($"[检查卡片] summonerId={summonerId} 缺少战绩数据");
                 return true;
             }
 
@@ -481,6 +499,7 @@ namespace League.Managers
 
                 // 获取所有需要补全的卡片
                 var cardsNeedCompletion = GetCardsNeedCompletion();
+
                 if (cardsNeedCompletion.Count == 0)
                 {
                     Debug.WriteLine("[批量校验] 没有需要补全的卡片");
@@ -489,39 +508,57 @@ namespace League.Managers
 
                 Debug.WriteLine($"[批量校验] 需要补全 {cardsNeedCompletion.Count} 张卡片");
 
-                // 分批处理，避免并发过高
-                const int batchSize = 3;
-                var batches = cardsNeedCompletion.Select((card, index) => new { card, index })
-                    .GroupBy(x => x.index / batchSize)
-                    .Select(g => g.Select(x => x.card).ToList())
-                    .ToList();
-
-                foreach (var batch in batches)
+                // 处理每张需要补全的卡片
+                foreach (var cardInfo in cardsNeedCompletion)
                 {
-                    var tasks = new List<Task<bool>>();
-
-                    foreach (var cardInfo in batch)
+                    try
                     {
-                        // 查找玩家数据
-                        var playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
-                        if (playerData == null)
+                        // 特殊处理summonerId=0的隐藏玩家
+                        if (cardInfo.SummonerId == 0)
                         {
-                            Debug.WriteLine($"[批量校验] 未找到summonerId={cardInfo.SummonerId}的玩家数据");
+                            Debug.WriteLine($"[隐藏玩家修复] 修复summonerId=0的卡片显示");
+                            FormUiStateManager.SafeInvoke(cardInfo.Card, () =>
+                            {
+                                if (!cardInfo.Card.IsDisposed)
+                                {
+                                    // 修正隐藏玩家的显示
+                                    if (cardInfo.CurrentName == "查询失败" || cardInfo.CurrentName == "失败")
+                                    {
+                                        cardInfo.Card.lblPlayerName.Text = "隐藏玩家";
+                                    }
+                                    if (cardInfo.CurrentSoloRank == "隐藏玩家" || cardInfo.CurrentSoloRank == "失败")
+                                    {
+                                        cardInfo.Card.lblSoloRank.Text = "隐藏";
+                                    }
+                                    if (cardInfo.CurrentFlexRank == "隐藏玩家" || cardInfo.CurrentFlexRank == "失败")
+                                    {
+                                        cardInfo.Card.lblFlexRank.Text = "隐藏";
+                                    }
+                                    cardInfo.Card.lblPrivacyStatus.Text = "隐藏";
+                                    cardInfo.Card.lblPlayerName.LinkColor = Color.Gray;
+                                }
+                            });
                             continue;
                         }
 
-                        // 异步处理每个卡片
-                        tasks.Add(RetryAndUpdatePlayerCard(cardInfo, playerData));
+                        // 普通玩家：重新查询数据
+                        var playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
+                        if (playerData != null)
+                        {
+                            await RetryAndUpdatePlayerCard(cardInfo, playerData);
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[批量校验] 未找到summonerId={cardInfo.SummonerId}的玩家数据");
+                        }
+
+                        // 避免过快请求
+                        await Task.Delay(200);
                     }
-
-                    // 等待批次完成
-                    var results = await Task.WhenAll(tasks);
-                    var successCount = results.Count(r => r);
-
-                    Debug.WriteLine($"[批量校验] 批次处理完成，成功: {successCount}/{tasks.Count}");
-
-                    // 批次间延迟，避免服务器压力
-                    await Task.Delay(500);
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[批量校验卡片异常] summonerId={cardInfo.SummonerId}: {ex.Message}");
+                    }
                 }
 
                 Debug.WriteLine("[批量校验] 批量校验完成");
@@ -619,6 +656,34 @@ namespace League.Managers
         /// </summary>
         public PlayerMatchInfo CreateFailedPlayerInfo(long summonerId, int championId)
         {
+            // 获取英雄信息
+            string championName = GetChampionName(championId);
+            Image championIcon = Task.Run(() => GetChampionIconAsync(championId)).Result ??
+                                LoadErrorImage();
+
+            // 如果是summonerId=0，直接返回隐藏玩家信息
+            if (summonerId == 0)
+            {
+                return new PlayerMatchInfo
+                {
+                    Player = new PlayerInfo
+                    {
+                        SummonerId = summonerId,
+                        ChampionId = championId,
+                        ChampionName = GetChampionName(championId),
+                        GameName = "隐藏玩家",
+                        IsPublic = "隐藏",
+                        SoloRank = "隐藏",
+                        FlexRank = "隐藏",
+                        Avatar = championIcon,
+                        NameColor = Color.Gray
+                    },
+                    MatchItems = new List<ListViewItem>(),
+                    HeroIcons = new ImageList()
+                };
+            }
+
+            // 普通玩家查询失败
             return new PlayerMatchInfo
             {
                 Player = new PlayerInfo
@@ -630,11 +695,28 @@ namespace League.Managers
                     IsPublic = "[失败]",
                     SoloRank = "失败",
                     FlexRank = "失败",
-                    Avatar = LoadErrorImage()
+                    Avatar = championIcon,
+                    NameColor = Color.DarkRed
                 },
                 MatchItems = new List<ListViewItem>(),
                 HeroIcons = new ImageList()
             };
+        }
+
+        /// <summary>
+        /// 获取英雄名称
+        /// </summary>
+        private string GetChampionName(int championId)
+        {
+            return Globals.resLoading.GetChampionById(championId)?.Name ?? "Unknown";
+        }
+
+        /// <summary>
+        /// 获取英雄图标
+        /// </summary>
+        private async Task<Image> GetChampionIconAsync(int championId)
+        {
+            return await Globals.resLoading.GetChampionIconAsync(championId);
         }
 
         /// <summary>

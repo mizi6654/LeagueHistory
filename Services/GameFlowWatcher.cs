@@ -131,13 +131,11 @@ namespace League.Services
                 case "ReadyCheck":
                     _uiManager.IsGame = false;
 
-                    // ===== 新增：开局时立刻清空所有战绩缓存（包括你自己）=====
+                    // 开局时立刻清空所有战绩缓存（包括你自己）
                     _cardManager.ClearAllCaches();
                     _cardManager.ClearGameState();
                     _matchQueryProcessor.ClearPlayerMatchCache();
-                    // =========================================================
 
-                    _cardManager.ClearGameState();
                     FormUiStateManager.SafeInvoke(_form.imageTabControl1, () =>
                     {
                         _uiManager.SetLcuUiState(_uiManager.LcuReady, _uiManager.IsGame);
@@ -185,7 +183,7 @@ namespace League.Services
                     break;
 
                 case "InProgress":
-                    _champSelectCts?.Cancel();
+                    _champSelectCts?.Cancel();  // 停止我方轮询
                     await ShowEnemyTeamCards(); // 显示敌方战绩卡片
                     break;
 
@@ -195,11 +193,10 @@ namespace League.Services
                 case "Lobby":
                 case "None":
 
-                    // ===== 新增：游戏结束或回到大厅时也清空缓存（双保险）=====
+                    // 游戏结束或回到大厅时也清空缓存（双保险）
                     _cardManager.ClearAllCaches();
                     _cardManager.ClearGameState();
                     _matchQueryProcessor.ClearPlayerMatchCache();
-                    // =====================================================
 
                     await HandleGameEndPhase(previousPhase);
                     break;
