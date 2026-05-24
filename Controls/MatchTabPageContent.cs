@@ -5,7 +5,7 @@ using Newtonsoft.Json.Linq;
 using System.ComponentModel;
 using System.Diagnostics;
 
-namespace League.uitls
+namespace League.Controls
 {
     public partial class MatchTabPageContent : UserControl, IDisposable
     {

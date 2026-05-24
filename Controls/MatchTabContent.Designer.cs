@@ -1,6 +1,6 @@
 ﻿using League.Controls;
 
-namespace League.uitls
+namespace League.Controls
 {
     partial class MatchTabContent
     {

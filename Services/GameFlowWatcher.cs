@@ -58,6 +58,8 @@ namespace League.Services
             _watcherCts?.Dispose();
             _watcherCts = null;
 
+            _phaseMonitor.Stop();
+
             _autoPickService.Stop();
             _cleanupService.Cleanup();
         }

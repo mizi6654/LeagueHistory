@@ -1,4 +1,4 @@
-﻿namespace League.uitls
+﻿namespace League.Controls
 {
     partial class MatchTabPageContent
     {

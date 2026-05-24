@@ -77,13 +77,58 @@ namespace League.UIHelpers
             return null;
         }
 
+        //private string SearchDirectory(string currentDir, string[] targetSubDirs, int maxDepth, int currentDepth = 0)
+        //{
+        //    if (currentDepth > maxDepth) return null;
+
+        //    try
+        //    {
+        //        // 检查当前目录下是否有目标子目录
+        //        foreach (var subDirName in targetSubDirs)
+        //        {
+        //            string subPath = Path.Combine(currentDir, subDirName);
+        //            if (Directory.Exists(subPath))
+        //            {
+        //                string exe = FindExeInSubDir(subPath, subDirName);
+        //                if (!string.IsNullOrEmpty(exe))
+        //                    return exe;
+        //            }
+        //        }
+
+        //        // 继续搜索下一级目录
+        //        foreach (var dir in Directory.GetDirectories(currentDir))
+        //        {
+        //            // 跳过常见大目录，加快搜索
+        //            string dirName = Path.GetFileName(dir)?.ToLower() ?? "";
+        //            if (dirName.Contains("windows") || dirName.Contains("appdata") || dirName.Contains("$"))
+        //                continue;
+
+        //            string found = SearchDirectory(dir, targetSubDirs, maxDepth, currentDepth + 1);
+        //            if (!string.IsNullOrEmpty(found))
+        //                return found;
+        //        }
+        //    }
+        //    catch { }
+
+        //    return null;
+        //}
         private string SearchDirectory(string currentDir, string[] targetSubDirs, int maxDepth, int currentDepth = 0)
         {
             if (currentDepth > maxDepth) return null;
 
+            string dirName = Path.GetFileName(currentDir)?.ToLowerInvariant() ?? "";
+
+            // 加强黑名单，防止进入受保护目录
+            if (dirName is "windows" or "appdata" or "programdata" or
+                         "documents and settings" or "$recycle.bin" or
+                         "system volume information" or "recovery" or "perflogs")
+            {
+                return null;
+            }
+
             try
             {
-                // 检查当前目录下是否有目标子目录
+                // 检查当前目录下是否有目标子文件夹（如 bin、x64、Game 等）
                 foreach (var subDirName in targetSubDirs)
                 {
                     string subPath = Path.Combine(currentDir, subDirName);
@@ -95,20 +140,22 @@ namespace League.UIHelpers
                     }
                 }
 
-                // 继续搜索下一级目录
-                foreach (var dir in Directory.GetDirectories(currentDir))
+                // 递归子目录
+                foreach (var dir in Directory.EnumerateDirectories(currentDir))
                 {
-                    // 跳过常见大目录，加快搜索
-                    string dirName = Path.GetFileName(dir)?.ToLower() ?? "";
-                    if (dirName.Contains("windows") || dirName.Contains("appdata") || dirName.Contains("$"))
-                        continue;
-
                     string found = SearchDirectory(dir, targetSubDirs, maxDepth, currentDepth + 1);
                     if (!string.IsNullOrEmpty(found))
                         return found;
                 }
             }
-            catch { }
+            catch (UnauthorizedAccessException)
+            {
+                // 权限不足，安静跳过
+            }
+            catch (Exception ex) when (ex is IOException or PathTooLongException)
+            {
+                // 其他IO问题也跳过
+            }
 
             return null;
         }

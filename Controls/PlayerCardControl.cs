@@ -1,4 +1,4 @@
-﻿namespace League.uitls
+﻿namespace League.Controls
 {
     public partial class PlayerCardControl : UserControl
     {

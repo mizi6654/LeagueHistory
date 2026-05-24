@@ -10,7 +10,6 @@ using League.PrimaryElection;
 using League.Services;
 using League.States;
 using League.UIState;
-using League.uitls;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
@@ -675,7 +674,7 @@ namespace League
         {
             if (_matchTabContent != null)
             {
-                _matchTabContent.CleanupAllTabs();
+                _matchTabContent.CleanupAllTabs(isFormClosing: true);
             }
 
             _gameFlowWatcher?.StopGameflowWatcher();
