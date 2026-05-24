@@ -46,11 +46,6 @@ namespace League.Managers
             _cache.RegisterCard(summonerId, card);
         }
 
-        //public async Task CreateBasicCardsOnly(JArray team, bool isMyTeam, int row)
-        //{
-        //    await _uiManager.CreateBasicCardsOnly(team, isMyTeam, row, _factory);
-        //}
-
         public async Task CreateBasicCardsOnly(JArray team, bool isMyTeam, int row)
         {
             await _uiManager.CreateBasicCardsOnly(team, isMyTeam, row, _factory, _cache);
@@ -142,6 +137,68 @@ namespace League.Managers
                     }
 
                     await Task.Delay(150);
+                }
+            }
+            finally
+            {
+                _uiManager._uiLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// 最终强补全（推荐在InProgress阶段调用）
+        /// </summary>
+        public async Task ForceValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
+        {
+            if (teamOne == null || teamTwo == null) return;
+
+            await _uiManager._uiLock.WaitAsync();
+            try
+            {
+                // 获取当前所有可能有问题的卡片（放宽条件）
+                var cardsNeedFix = _validator.GetCardsNeedCompletion();
+
+                // 如果Validator没找到问题，强制扫描所有卡片
+                if (cardsNeedFix.Count == 0)
+                {
+                    cardsNeedFix = _validator.ForceGetAllCardsForCompletion();
+                }
+
+                Debug.WriteLine($"[强补全] 发现 {cardsNeedFix.Count} 个需要处理的卡片");
+
+                foreach (var cardInfo in cardsNeedFix.Take(10)) // 最多处理10个
+                {
+                    try
+                    {
+                        JToken? playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
+
+                        if (playerData == null && cardInfo.SummonerId == 0)
+                        {
+                            _validator.FixHiddenPlayerCard(cardInfo.Card);
+                            continue;
+                        }
+
+                        if (playerData == null) continue;
+
+                        var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData, retryTimes: 3);
+
+                        if (matchInfo?.Player != null)
+                        {
+                            _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
+                            _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
+                            Debug.WriteLine($"[强补全成功] {matchInfo.Player.GameName}");
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[强补全失败] SummonerId: {cardInfo.SummonerId}");
+                        }
+
+                        await Task.Delay(120); // 控制频率
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[强补全单卡异常] {ex.Message}");
+                    }
                 }
             }
             finally

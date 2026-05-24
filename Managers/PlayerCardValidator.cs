@@ -89,5 +89,45 @@ namespace League.Managers
                 card.lblPlayerName.LinkColor = Color.Gray;
             });
         }
+
+        public List<PlayerCardValidationInfo> ForceGetAllCardsForCompletion()
+        {
+            var result = new List<PlayerCardValidationInfo>();
+
+            FormUiStateManager.SafeInvoke(_form.tableLayoutPanel1, () =>
+            {
+                for (int row = 0; row < _form.tableLayoutPanel1.RowCount; row++)
+                {
+                    for (int col = 0; col < _form.tableLayoutPanel1.ColumnCount; col++)
+                    {
+                        var panel = _form.tableLayoutPanel1.GetControlFromPosition(col, row) as BorderPanel;
+                        if (panel?.Controls.Count > 0)
+                        {
+                            var card = panel.Controls[0] as PlayerCardControl;
+                            if (card != null && !card.IsDisposed)
+                            {
+                                // 只要战绩列表为空就认为需要补全（最关键条件）
+                                if (card.ListViewControl.Items.Count == 0 ||
+                                    card.lblSoloRank.Text.Contains("未知") ||
+                                    card.lblSoloRank.Text == "失败")
+                                {
+                                    result.Add(new PlayerCardValidationInfo
+                                    {
+                                        SummonerId = card.CurrentSummonerId,
+                                        ChampionId = card.CurrentChampionId,
+                                        Row = row,
+                                        Column = col,
+                                        Card = card,
+                                        CurrentName = card.lblPlayerName.Text
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            return result;
+        }
     }
 }

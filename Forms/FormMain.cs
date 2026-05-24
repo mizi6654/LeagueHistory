@@ -28,6 +28,8 @@ namespace League
         private MatchQueryProcessor? _matchQueryProcessor;
         private ConfigUpdateManager? _configUpdateManager;
         private MatchDetailManager? _matchDetailManager;
+        // 英雄管理器（用于预加载所有英雄数据）
+        private ChampionManager? _championManager;
 
         // 原有字段
         private AsyncPoller _lcuPoller = new AsyncPoller();
@@ -69,6 +71,12 @@ namespace League
         {
             // UI提示处理
             _uiManager = new FormUiStateManager(this);
+
+            // 预选英雄管理器
+            _championManager = new ChampionManager(
+                new HttpClient(),           // 直接新建，不依赖 LCU
+                Globals.resLoading
+            );
 
             // 选人阶段卡片战绩查询
             _matchQueryProcessor = new MatchQueryProcessor();
@@ -218,6 +226,20 @@ namespace League
             // 加载资源
             Globals.resLoading.loadingResource(Globals.lcuClient);
 
+            if (_championManager != null)
+            {
+                try
+                {
+                    Debug.WriteLine("[英雄预加载] 开始加载所有英雄数据...");
+                    await _championManager.InitializeAsync(forceRefresh: false); // false = 优先用缓存
+                    Debug.WriteLine($"[英雄预加载] 成功！共加载 {_championManager.AllChampions.Count} 个英雄");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[英雄预加载] 失败: {ex.Message}");
+                }
+            }
+
             // 初始化SGP
             if (await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client))
             {
@@ -242,7 +264,6 @@ namespace League
                 string? currentPhase = await Globals.lcuClient.GetGameflowPhase();
                 if (!string.IsNullOrEmpty(currentPhase))
                 {
-                    //await _gameFlowWatcher!.HandleGameflowPhase(currentPhase, null);
                     await _gameFlowWatcher!.OnGameflowPhaseChanged(currentPhase, null);
                 }
                 _gameFlowWatcher!.StartGameflowWatcher();

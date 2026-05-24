@@ -232,7 +232,6 @@
 //    }
 //}
 
-using League.Controls;
 using League.Models;
 using League.States;
 using System.Diagnostics;
@@ -389,6 +388,37 @@ namespace League.Controls
                 {
                     MainTabControl.SelectedTab = page;
                     Debug.WriteLine($"[Tab 已存在] 切换到: {puuid}");
+
+                    if (_tabPageContents.TryGetValue(page, out var existingContent))
+                    {
+                        bool isCurrentPlayer = string.Equals(puuid, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase);
+
+                        if (RefreshState.ForceMatchRefresh && isCurrentPlayer)
+                        {
+                            Debug.WriteLine($"[强制刷新] 检测到 ForceMatchRefresh=true，正在刷新当前玩家战绩");
+
+                            existingContent.SetNeedsRefresh(true);   // 确保 MatchTabPageContent 有这个方法
+
+                            // 延迟执行刷新
+                            Task.Delay(800).ContinueWith(async _ =>
+                            {
+                                try
+                                {
+                                    if (existingContent.NeedsRefresh)
+                                    {
+                                        await existingContent.ForceRefreshData(puuid);
+                                        existingContent.SetNeedsRefresh(false);
+                                        RefreshState.ForceMatchRefresh = false;   // 刷新完重置
+                                        Debug.WriteLine("[强制刷新] 当前玩家战绩刷新完成");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"[强制刷新异常] {ex}");
+                                }
+                            }, TaskScheduler.FromCurrentSynchronizationContext());
+                        }
+                    }
                     return;
                 }
             }

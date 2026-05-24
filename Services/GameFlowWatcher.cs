@@ -1,7 +1,9 @@
 ﻿using League.Managers;
 using League.Parsers;
 using League.UIState;
+using Newtonsoft.Json.Linq;
 using System.Diagnostics;
+using static League.FormMain;
 
 namespace League.Services
 {
@@ -141,6 +143,37 @@ namespace League.Services
         {
             _autoPickService.Stop();
             await _cardDisplayService.ShowEnemyTeamCardsAsync();
+
+            // 🔥 游戏开始后的最终强补全（最重要）
+            await PerformFinalCardCompletion();
+        }
+
+        /// <summary>
+        /// 游戏进入InProgress后的最终卡片补全（读秒阶段强补）
+        /// </summary>
+        private async Task PerformFinalCardCompletion()
+        {
+            try
+            {
+                Debug.WriteLine("[FinalCompletion] 开始执行最终卡片补全...");
+
+                var sessionData = await Globals.lcuClient.GetGameSession();
+                if (sessionData == null) return;
+
+                var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
+                var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
+
+                if (teamOne == null || teamTwo == null) return;
+
+                // 强制补全所有卡片（不依赖Validator的严格判断）
+                await _cardManager.ForceValidateAndCompleteAllCards(teamOne, teamTwo);
+
+                Debug.WriteLine("[FinalCompletion] 最终补全执行完成");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[FinalCompletion] 异常: {ex.Message}");
+            }
         }
 
         private async Task HandleGameEnd(string? previousPhase)
