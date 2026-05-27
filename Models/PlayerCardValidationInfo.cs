@@ -9,6 +9,7 @@ namespace League.Models
     {
         public long SummonerId { get; set; }
         public int ChampionId { get; set; }
+        public string Puuid { get; set; } = "";
         public int Row { get; set; }
         public int Column { get; set; }
         public PlayerCardControl Card { get; set; }

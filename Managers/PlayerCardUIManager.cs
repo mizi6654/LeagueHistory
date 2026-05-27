@@ -29,6 +29,7 @@ namespace League.Managers
                 {
                     long summonerId = p["summonerId"]?.Value<long>() ?? 0;
                     int championId = p["championId"]?.Value<int>() ?? 0;
+                    string puuid = p["puuid"]?.ToString() ?? "";
 
                     // 更新缓存映射（隐藏玩家也需要更新 championId 映射）
                     cache?.UpdateCurrentChampion(summonerId, championId, col);
@@ -52,6 +53,7 @@ namespace League.Managers
                                     existingCard.CurrentChampionId = championId;
                                 }
                             });
+                            existingCard.CurrentPuuId = puuid;
                         }
                         col++;
                         continue;
@@ -69,7 +71,7 @@ namespace League.Managers
                         loadingInfo = factory.CreateLoadingPlayerInfo(p);
                     }
 
-                    CreateLoadingPlayerMatch(loadingInfo, isMyTeam, row, col);
+                    CreateLoadingPlayerMatch(loadingInfo, isMyTeam, row, col,puuid);
                     col++;
                 }
             }
@@ -83,7 +85,7 @@ namespace League.Managers
             }
         }
 
-        public void CreateLoadingPlayerMatch(PlayerMatchInfo matchInfo, bool isMyTeam, int row, int column)
+        public void CreateLoadingPlayerMatch(PlayerMatchInfo matchInfo, bool isMyTeam, int row, int column,string puuid = "")
         {
             var player = matchInfo.Player;
             Color borderColor = row == 0 ? Color.Red : row == 1 ? Color.Blue : Color.Gray;
@@ -106,7 +108,7 @@ namespace League.Managers
 
             // 关键调用
             card.SetPlayerInfo(name, soloRank, flexRank, player.Avatar, player.IsPublic,
-                matchInfo.MatchItems, player.NameColor, player.SummonerId, player.ChampionId);
+                matchInfo.MatchItems, player.NameColor, player.SummonerId, player.ChampionId, puuid ?? player.Puuid ?? "");
 
             // 【修复点】必须设置 SmallImageList
             if (matchInfo.HeroIcons != null)
@@ -165,6 +167,7 @@ namespace League.Managers
                     card.lblPlayerName.VisitedLinkColor = p.NameColor;
                     card.lblPlayerName.ActiveLinkColor = p.NameColor;
                 }
+                card.CurrentPuuId = matchInfo.Player.Puuid ?? "";
             });
         }
 

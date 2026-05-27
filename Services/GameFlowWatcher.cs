@@ -74,6 +74,9 @@ namespace League.Services
         {
             try
             {
+                // 🔥 最重要的调试日志
+                Debug.WriteLine($"[Phase Changed] {previousPhase ?? "null"} → {phase} | 时间: {DateTime.Now:HH:mm:ss.fff}");
+
                 switch (phase)
                 {
                     case "Matchmaking":
@@ -89,18 +92,16 @@ namespace League.Services
                         await HandleGameInProgress();
                         break;
 
+                    // 🔥 扩大触发范围 + 放宽 previousPhase 条件
                     case "EndOfGame":
                     case "PreEndOfGame":
                     case "WaitingForStats":
                     case "Lobby":
                     case "None":
-                        await HandleGameEnd(previousPhase);
+                        Debug.WriteLine($"[GameEnd Trigger] 检测到结束阶段: {phase}, previous={previousPhase}");
+                        await HandleGameEnd(previousPhase ?? phase);  // 即使 previousPhase 为空也尝试处理
                         break;
                 }
-            }
-            catch (TaskCanceledException)
-            {
-                Debug.WriteLine("[GameFlowWatcher] 任务被正常取消");
             }
             catch (Exception ex)
             {
@@ -114,6 +115,7 @@ namespace League.Services
             _cardManager.ClearAllCaches();
             _cardManager.ClearGameState();
             _matchQueryProcessor.ClearPlayerMatchCache();
+            _cleanupService.Reset();
 
             // 🔥 重置自动接受状态
             _autoAccepter.Reset();
@@ -143,46 +145,28 @@ namespace League.Services
         {
             _autoPickService.Stop();
             await _cardDisplayService.ShowEnemyTeamCardsAsync();
-
-            // 🔥 游戏开始后的最终强补全（最重要）
-            await PerformFinalCardCompletion();
-        }
-
-        /// <summary>
-        /// 游戏进入InProgress后的最终卡片补全（读秒阶段强补）
-        /// </summary>
-        private async Task PerformFinalCardCompletion()
-        {
-            try
-            {
-                Debug.WriteLine("[FinalCompletion] 开始执行最终卡片补全...");
-
-                var sessionData = await Globals.lcuClient.GetGameSession();
-                if (sessionData == null) return;
-
-                var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
-                var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
-
-                if (teamOne == null || teamTwo == null) return;
-
-                // 强制补全所有卡片（不依赖Validator的严格判断）
-                await _cardManager.ForceValidateAndCompleteAllCards(teamOne, teamTwo);
-
-                Debug.WriteLine("[FinalCompletion] 最终补全执行完成");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[FinalCompletion] 异常: {ex.Message}");
-            }
         }
 
         private async Task HandleGameEnd(string? previousPhase)
         {
-            if (previousPhase == "InProgress" || previousPhase == "WaitingForStats" || previousPhase == "ChampSelect")
+            Debug.WriteLine($"[HandleGameEnd] 被调用 | previousPhase={previousPhase}");
+
+            // 更宽松的判断逻辑（兼容各种跳变情况）
+            bool shouldHandle = previousPhase == "InProgress"
+                             || previousPhase == "WaitingForStats"
+                             || previousPhase == "ChampSelect"
+                             || previousPhase == "EndOfGame"           // 新增：当前阶段就是 EndOfGame
+                             || previousPhase == "PreEndOfGame";
+
+            if (shouldHandle)
             {
                 await _cleanupService.HandleGameEndAsync(previousPhase);
-                _autoAccepter.Reset();           // 额外保险
-                _autoPickService.Reset();        // 新增
+                _autoAccepter.Reset();
+                _autoPickService.Reset();
+            }
+            else
+            {
+                Debug.WriteLine($"[HandleGameEnd] 条件不满足，跳过处理");
             }
         }
 

@@ -485,11 +485,11 @@ namespace League.Controls
                 }
             });
 
-            // 重置强制刷新状态，避免后续重复刷新
-            RefreshState.ForceMatchRefresh = false;
-
             // 重新加载数据
             await LoadDataAsync(true);
+
+            // 重置强制刷新状态，避免后续重复刷新
+            RefreshState.ForceMatchRefresh = false;
         }
 
         // 辅助方法：获取当前头像ID

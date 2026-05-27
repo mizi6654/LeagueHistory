@@ -51,35 +51,90 @@ namespace League.Parsers
             Debug.WriteLine($"[MatchQueryProcessor] 筛选模式设置为: {filterByGameMode}");
         }
 
+        //public async Task<PlayerMatchInfo> SafeFetchPlayerMatchInfoAsync(JToken playerData, int retryTimes = 2)
+        //{
+        //    long sid = playerData["summonerId"]?.Value<long>() ?? 0;
+        //    int cid = playerData["championId"]?.Value<int>() ?? 0;
+        //    string nameVisibility = playerData["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
+
+        //    if (nameVisibility == "HIDDEN" || sid == 0)
+        //    {
+        //        EnsureFactoryInitialized();
+        //        return _factory.CreateHiddenPlayerInfo(sid, cid);
+        //    }
+
+        //    for (int attempt = 1; attempt <= retryTimes + 1; attempt++)
+        //    {
+        //        try
+        //        {
+        //            var info = await FetchPlayerMatchInfoAsync(playerData);
+        //            if (info?.Player?.SummonerId != 0)
+        //                return info;
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            Debug.WriteLine($"[Fetch失败] 第 {attempt} 次尝试失败: {ex.Message}");
+        //            if (attempt <= retryTimes)
+        //                await Task.Delay(1000);
+        //        }
+        //    }
+
+        //    EnsureFactoryInitialized();
+        //    return _factory.CreateFailedPlayerInfo(sid, cid);
+        //}
+
         public async Task<PlayerMatchInfo> SafeFetchPlayerMatchInfoAsync(JToken playerData, int retryTimes = 2)
         {
             long sid = playerData["summonerId"]?.Value<long>() ?? 0;
+            string puuid = playerData["puuid"]?.ToString() ?? "";
             int cid = playerData["championId"]?.Value<int>() ?? 0;
+
             string nameVisibility = playerData["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
 
-            if (nameVisibility == "HIDDEN" || sid == 0)
+            // 🔥 真正隐藏的玩家才直接返回 Hidden
+            if (nameVisibility == "HIDDEN")
             {
-                EnsureFactoryInitialized();
+                Debug.WriteLine($"[HiddenPlayer] nameVisibility=HIDDEN → 标记为隐藏");
                 return _factory.CreateHiddenPlayerInfo(sid, cid);
             }
 
+            // summonerId 为0，但有 puuid → 数据不完整，使用 puuid 兜底查询
+            if (sid == 0 && !string.IsNullOrEmpty(puuid))
+            {
+                Debug.WriteLine($"[Puuid兜底] summonerId=0 但有 puuid，使用 puuid 查询: {puuid.Substring(0, 8)}...");
+
+                var tempData = new JObject
+                {
+                    ["puuid"] = puuid,
+                    ["championId"] = cid,
+                    ["summonerId"] = 0
+                };
+
+                return await FetchPlayerMatchInfoAsync(tempData);
+            }
+
+            // 正常情况
             for (int attempt = 1; attempt <= retryTimes + 1; attempt++)
             {
                 try
                 {
                     var info = await FetchPlayerMatchInfoAsync(playerData);
-                    if (info?.Player?.SummonerId != 0)
+                    if (info?.Player != null &&
+                        (!string.IsNullOrEmpty(info.Player.Puuid) || info.Player.SummonerId != 0))
+                    {
                         return info;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[Fetch失败] 第 {attempt} 次尝试失败: {ex.Message}");
+                    Debug.WriteLine($"[SafeFetch] 第{attempt}次失败: {ex.Message}");
                     if (attempt <= retryTimes)
-                        await Task.Delay(1000);
+                        await Task.Delay(800);
                 }
             }
 
-            EnsureFactoryInitialized();
+            // 最终失败
+            Debug.WriteLine($"[SafeFetch] 多次尝试后仍失败 → SID:{sid} Puuid:{puuid.Substring(0, 8)}...");
             return _factory.CreateFailedPlayerInfo(sid, cid);
         }
 

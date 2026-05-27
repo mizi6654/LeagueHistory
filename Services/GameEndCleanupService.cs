@@ -26,10 +26,19 @@ namespace League.Services
 
         public async Task HandleGameEndAsync(string? previousPhase)
         {
-            if (_gameEndHandled) return;
-
-            if (previousPhase == "InProgress" || previousPhase == "WaitingForStats" || previousPhase == "ChampSelect")
+            // 放宽条件
+            if (previousPhase == "InProgress" ||
+                previousPhase == "WaitingForStats" ||
+                previousPhase == "ChampSelect" ||
+                previousPhase == "EndOfGame" ||
+                previousPhase == "PreEndOfGame")
             {
+                if (_gameEndHandled)
+                {
+                    Debug.WriteLine("[HandleGameEndAsync] 已处理过，跳过重复执行");
+                    return;
+                }
+
                 _gameEndHandled = true;
                 await OnGameEnd();
             }

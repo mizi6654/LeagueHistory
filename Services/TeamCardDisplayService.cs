@@ -1,5 +1,6 @@
 ﻿using League.Managers;
 using League.UIState;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using static League.FormMain;
@@ -113,17 +114,26 @@ namespace League.Services
                 var sessionData = await Globals.lcuClient.GetGameSession();
                 if (sessionData == null) return;
 
+                SaveTeamDataForDebug(sessionData);
+
                 int queueId = sessionData["gameData"]?["queue"]?["id"]?.Value<int>() ?? 0;
                 Globals.CurrGameMod = queueId.ToString();
 
                 var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
                 var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
+                var selections = sessionData["gameData"]?["playerChampionSelections"] as JArray;
+
+                // 🔥 核心：补全缺失的玩家（基于 puuid）
+                if (selections != null && selections.Count == 10)
+                {
+                    (teamOne, teamTwo) = EnsureAllPlayersPresent(teamOne, teamTwo, selections);
+                    Debug.WriteLine($"[EnsurePlayers] 补全后 → Team1:{teamOne?.Count ?? 0} | Team2:{teamTwo?.Count ?? 0}");
+                }
 
                 if (teamOne == null || teamTwo == null) return;
 
                 bool isInTeamOne = teamOne.Any(t => t["puuid"]?.ToString() == myPuuid);
                 JArray enemyTeam = isInTeamOne ? teamTwo : teamOne;
-
                 int enemyRow = isInTeamOne ? 1 : 0;
 
                 _form._cachedEnemyTeam = enemyTeam;
@@ -131,11 +141,74 @@ namespace League.Services
                 await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
                 await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
 
+                await Task.Delay(700);
                 await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[TeamCardDisplay] 显示敌方卡片异常: {ex.Message}");
+                Debug.WriteLine($"[ShowEnemyTeamCards] 异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 确保 teamOne 和 teamTwo 包含所有10个 puuid（使用 playerChampionSelections 补全）
+        /// </summary>
+        private (JArray teamOne, JArray teamTwo) EnsureAllPlayersPresent(
+            JArray? teamOne, JArray? teamTwo, JArray selections)
+        {
+            var finalTeamOne = teamOne?.DeepClone() as JArray ?? new JArray();
+            var finalTeamTwo = teamTwo?.DeepClone() as JArray ?? new JArray();
+
+            // 收集当前已有的 puuid
+            var existingPuuids = new HashSet<string>();
+            foreach (var p in finalTeamOne) existingPuuids.Add(p["puuid"]?.ToString() ?? "");
+            foreach (var p in finalTeamTwo) existingPuuids.Add(p["puuid"]?.ToString() ?? "");
+
+            // 补充缺失的玩家
+            foreach (var sel in selections)
+            {
+                string? puuid = sel["puuid"]?.ToString();
+                if (string.IsNullOrEmpty(puuid) || existingPuuids.Contains(puuid))
+                    continue;
+
+                // 创建缺失玩家对象
+                var missingPlayer = new JObject
+                {
+                    ["puuid"] = puuid,
+                    ["championId"] = sel["championId"],
+                    ["summonerId"] = 0,
+                    ["summonerName"] = "",
+                    ["profileIconId"] = 0,
+                    ["selectedPosition"] = "NONE"
+                };
+
+                // 优先补到人数少的队伍
+                if (finalTeamOne.Count < 5)
+                    finalTeamOne.Add(missingPlayer);
+                else if (finalTeamTwo.Count < 5)
+                    finalTeamTwo.Add(missingPlayer);
+            }
+
+            return (finalTeamOne, finalTeamTwo);
+        }
+
+        private void SaveTeamDataForDebug(JObject sessionData)
+        {
+            try
+            {
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
+                string debugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug_teams");
+                Directory.CreateDirectory(debugPath);
+
+                // 正确写法
+                File.WriteAllText(Path.Combine(debugPath, $"session_{timestamp}.json"),
+                    sessionData.ToString(Formatting.Indented));
+
+                Debug.WriteLine($"[Debug] 已保存 session_{timestamp}.json");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DebugSave] 保存失败: {ex.Message}");
             }
         }
 

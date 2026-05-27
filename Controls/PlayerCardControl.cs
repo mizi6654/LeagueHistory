@@ -6,6 +6,7 @@
         // 新增：用来精准判断“这个卡片到底属于谁、选了什么英雄”
         public long CurrentSummonerId { get; set; } = 0;
         public int CurrentChampionId { get; set; } = 0;
+        public string CurrentPuuId { get; set; } ="";
 
         public PlayerCardControl()
         {
@@ -25,11 +26,12 @@
             }
         }
 
-        public void SetPlayerInfo(string playerName, string soloRank, string flexRank, Image heroImage, string isPublic, List<ListViewItem> recentGames, Color nameColor, long summonerId = 0, int championId = 0)
+        public void SetPlayerInfo(string playerName, string soloRank, string flexRank, Image heroImage, string isPublic, List<ListViewItem> recentGames, Color nameColor, long summonerId = 0, int championId = 0, string puuid = "")
         {
             // 保存关键标识（最重要！）
             CurrentSummonerId = summonerId;
             CurrentChampionId = championId;
+            CurrentPuuId = puuid ?? "";
 
             //lblPlayerName 是一个LinkLabel控件
             lblPlayerName.Text = playerName;

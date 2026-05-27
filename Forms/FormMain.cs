@@ -38,7 +38,7 @@ namespace League
         private CancellationTokenSource? _champSelectCts;
         public int myTeamId = 0;
         public List<string> lastChampSelectSnapshot = new List<string>();
-        public string lastChampSelectSnapshotString = "";   // 新增：更可靠的快照字符串
+        public string lastChampSelectSnapshotString = "";   
         private Poller _tab1Poller = new Poller();
         private bool _champSelectMessageSent = false;
         public JArray? _cachedMyTeam;

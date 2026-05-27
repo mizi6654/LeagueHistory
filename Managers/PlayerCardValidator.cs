@@ -33,6 +33,7 @@ namespace League.Managers
                                 {
                                     SummonerId = card.CurrentSummonerId,
                                     ChampionId = card.CurrentChampionId,
+                                    Puuid = card.CurrentPuuId,
                                     Row = row,
                                     Column = col,
                                     Card = card,
