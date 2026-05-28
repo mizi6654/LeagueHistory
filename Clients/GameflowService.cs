@@ -37,6 +37,11 @@ namespace League.Clients
                 Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
                 return null;
             }
+            catch (HttpRequestException ex) 
+            {
+                Debug.WriteLine($"由于目标计算机积极拒绝，无法连接。");
+                return null;
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine($"获取游戏阶段失败: {ex}");

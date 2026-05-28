@@ -43,6 +43,8 @@ namespace League.Services
 
             // 订阅阶段变化事件
             _phaseMonitor.PhaseChanged += OnGameflowPhaseChanged;
+            // 订阅断线事件,调用主窗体的重连逻辑
+            _phaseMonitor.OnLcuDisconnected += HandleLcuDisconnected;
         }
 
         #region 启动与停止
@@ -51,6 +53,10 @@ namespace League.Services
             if (!_uiManager.LcuReady) return;
 
             _watcherCts = new CancellationTokenSource();
+
+            // 确保旧的已停止
+            _phaseMonitor.Stop();
+            _autoPickService.Stop();
             await _phaseMonitor.StartMonitoringAsync(_watcherCts.Token);
         }
 
@@ -64,6 +70,25 @@ namespace League.Services
 
             _autoPickService.Stop();
             _cleanupService.Cleanup();
+        }
+
+        // <summary>
+        /// LCU 断开连接处理
+        /// </summary>
+        private void HandleLcuDisconnected()
+        {
+            Debug.WriteLine("[GameFlowWatcher] 检测到 LCU 断开，准备重启连接轮询");
+
+            _uiManager.LcuReady = false;
+            _uiManager.IsGame = false;
+            _uiManager.SetLcuUiState(false, false);
+
+            // 清理当前监听
+            _phaseMonitor.Stop();
+            _autoPickService.Stop();
+
+            // 通知主窗体重新启动等待连接的轮询
+            _form.StartLcuConnectPolling();
         }
         #endregion
 

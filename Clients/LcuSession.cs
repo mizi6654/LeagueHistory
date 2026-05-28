@@ -108,6 +108,11 @@ namespace League.Clients
                 Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
                 return false;
             }
+            catch (HttpRequestException ex)
+            {
+                Debug.WriteLine($"[LCU] 由于目标计算机积极拒绝，无法连接。");
+                return false;
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[LCU] 其他异常: {ex}");
