@@ -51,6 +51,7 @@
 
 ![消息配置](image/消息配置.png)
 *发送消息配置界面*
+
 ---
 
 ## 历史版本更新记录
@@ -81,12 +82,12 @@
 文件大小：50.3 MB  
 SHA256 校验码：`39e86864786771efd9994c1256013df3ccb7ff7ba87384631f64dac09c064244`
 
-> 将压缩包解压后运行 `联盟视界.exe` 即可，无需额外依赖。
+> 将压缩包解压后运行 `League.exe` 即可，无需额外依赖。
 
 ---
 
 ## 联系与反馈
 
 - GitHub Issues: [https://github.com/mizi6654/LeagueHistory/issues](https://github.com/mizi6654/LeagueHistory/issues)
-- 邮箱联系: `你的邮箱@example.com`
+- QQ群联系: `1035850775`
 - 欢迎大家提交问题与建议，帮助“联盟视界”持续优化体验！
