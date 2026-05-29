@@ -161,6 +161,7 @@ namespace League.Parsers
             if (tagList.Contains("q_1700")) return "斗魂竞技场";
             if (tagList.Contains("q_2400")) return "海克斯乱斗";           // 确保有
             if (tagList.Contains("q_3270")) return "自定义 · 海克斯乱斗";
+            if (tagList.Contains("q_3100")) return "自定义 · 召唤师峡谷";
             if (tagList.Contains("q_950") || tagList.Contains("q_960")) return "末日人机";
             if (tagList.Contains("q_1900")) return "快速模式";
             if (tagList.Contains("q_2000") || tagList.Contains("q_2010") || tagList.Contains("q_2020")) return "神木之门";

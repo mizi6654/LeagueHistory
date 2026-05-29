@@ -51,38 +51,6 @@ namespace League.Parsers
             Debug.WriteLine($"[MatchQueryProcessor] 筛选模式设置为: {filterByGameMode}");
         }
 
-        //public async Task<PlayerMatchInfo> SafeFetchPlayerMatchInfoAsync(JToken playerData, int retryTimes = 2)
-        //{
-        //    long sid = playerData["summonerId"]?.Value<long>() ?? 0;
-        //    int cid = playerData["championId"]?.Value<int>() ?? 0;
-        //    string nameVisibility = playerData["nameVisibilityType"]?.ToString() ?? "UNHIDDEN";
-
-        //    if (nameVisibility == "HIDDEN" || sid == 0)
-        //    {
-        //        EnsureFactoryInitialized();
-        //        return _factory.CreateHiddenPlayerInfo(sid, cid);
-        //    }
-
-        //    for (int attempt = 1; attempt <= retryTimes + 1; attempt++)
-        //    {
-        //        try
-        //        {
-        //            var info = await FetchPlayerMatchInfoAsync(playerData);
-        //            if (info?.Player?.SummonerId != 0)
-        //                return info;
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            Debug.WriteLine($"[Fetch失败] 第 {attempt} 次尝试失败: {ex.Message}");
-        //            if (attempt <= retryTimes)
-        //                await Task.Delay(1000);
-        //        }
-        //    }
-
-        //    EnsureFactoryInitialized();
-        //    return _factory.CreateFailedPlayerInfo(sid, cid);
-        //}
-
         public async Task<PlayerMatchInfo> SafeFetchPlayerMatchInfoAsync(JToken playerData, int retryTimes = 2)
         {
             long sid = playerData["summonerId"]?.Value<long>() ?? 0;
