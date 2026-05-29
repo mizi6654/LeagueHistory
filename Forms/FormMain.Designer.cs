@@ -44,6 +44,10 @@ namespace League
             tabPage3 = new TabPage();
             tabControl1 = new TabControl();
             tabPage4 = new TabPage();
+            lk_QQGroup = new LinkLabel();
+            label5 = new Label();
+            lk_GitPro = new LinkLabel();
+            label4 = new Label();
             chkAutoAccept = new CheckBox();
             groupBox1 = new GroupBox();
             chkNexus = new CheckBox();
@@ -210,6 +214,10 @@ namespace League
             // 
             // tabPage4
             // 
+            tabPage4.Controls.Add(lk_QQGroup);
+            tabPage4.Controls.Add(label5);
+            tabPage4.Controls.Add(lk_GitPro);
+            tabPage4.Controls.Add(label4);
             tabPage4.Controls.Add(chkAutoAccept);
             tabPage4.Controls.Add(groupBox1);
             tabPage4.Controls.Add(checkBoxFilterMode);
@@ -220,6 +228,46 @@ namespace League
             tabPage4.TabIndex = 0;
             tabPage4.Text = "功能辅助";
             tabPage4.UseVisualStyleBackColor = true;
+            // 
+            // lk_QQGroup
+            // 
+            lk_QQGroup.AutoSize = true;
+            lk_QQGroup.Location = new Point(74, 240);
+            lk_QQGroup.Name = "lk_QQGroup";
+            lk_QQGroup.Size = new Size(78, 17);
+            lk_QQGroup.TabIndex = 11;
+            lk_QQGroup.TabStop = true;
+            lk_QQGroup.Text = "1035850775";
+            lk_QQGroup.LinkClicked += lk_QQGroup_LinkClicked;
+            // 
+            // label5
+            // 
+            label5.AutoSize = true;
+            label5.Location = new Point(16, 267);
+            label5.Name = "label5";
+            label5.Size = new Size(56, 17);
+            label5.TabIndex = 10;
+            label5.Text = "项目地址";
+            // 
+            // lk_GitPro
+            // 
+            lk_GitPro.AutoSize = true;
+            lk_GitPro.Location = new Point(74, 267);
+            lk_GitPro.Name = "lk_GitPro";
+            lk_GitPro.Size = new Size(264, 17);
+            lk_GitPro.TabIndex = 9;
+            lk_GitPro.TabStop = true;
+            lk_GitPro.Text = "https://github.com/mizi6654/LeagueHistory/";
+            lk_GitPro.LinkClicked += lk_GitPro_LinkClicked;
+            // 
+            // label4
+            // 
+            label4.AutoSize = true;
+            label4.Location = new Point(32, 240);
+            label4.Name = "label4";
+            label4.Size = new Size(40, 17);
+            label4.TabIndex = 8;
+            label4.Text = "QQ群";
             // 
             // chkAutoAccept
             // 
@@ -378,7 +426,7 @@ namespace League
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "League v1.0.7";
+            Text = "联盟视界 League v1.0.8";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
             imageTabControl1.ResumeLayout(false);
@@ -425,5 +473,9 @@ namespace League
         private Label label3;
         private Label label2;
         private CheckBox chkAutoAccept;
+        private LinkLabel lk_GitPro;
+        private Label label4;
+        private LinkLabel lk_QQGroup;
+        private Label label5;
     }
 }

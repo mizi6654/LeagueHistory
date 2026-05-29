@@ -38,7 +38,7 @@ namespace League
         private CancellationTokenSource? _champSelectCts;
         public int myTeamId = 0;
         public List<string> lastChampSelectSnapshot = new List<string>();
-        public string lastChampSelectSnapshotString = "";   
+        public string lastChampSelectSnapshotString = "";
         private Poller _tab1Poller = new Poller();
         private bool _champSelectMessageSent = false;
         public JArray? _cachedMyTeam;
@@ -439,16 +439,16 @@ namespace League
             if (refreshFlag)
                 //Debug.WriteLine("⚡ 强制刷新已启用");
 
-            // 1️⃣ 尝试从缓存读取
-            if (!refreshFlag)
-            {
-                var cached = MatchCache.Get(puuid, queueId, begIndex, pageSize);
-                if (cached != null)
+                // 1️⃣ 尝试从缓存读取
+                if (!refreshFlag)
                 {
-                    //Debug.WriteLine($"从缓存读取: {puuid} [{queueId ?? "all"}] 起点{begIndex} 每页{pageSize}");
-                    return cached;
+                    var cached = MatchCache.Get(puuid, queueId, begIndex, pageSize);
+                    if (cached != null)
+                    {
+                        //Debug.WriteLine($"从缓存读取: {puuid} [{queueId ?? "all"}] 起点{begIndex} 每页{pageSize}");
+                        return cached;
+                    }
                 }
-            }
 
             // 2️⃣ 发起网络请求
             var allGames = await Globals.sgpClient.SgpFetchLatestMatches(puuid, begIndex, pageSize, queueId);
@@ -730,5 +730,51 @@ namespace League
         }
         #endregion
 
+        private void lk_GitPro_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            lk_GitPro.LinkVisited = true;
+
+            // 直接使用 LinkLabel 的 Text 作为 URL
+            string url = lk_GitPro.Text;
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"无法打开链接：{ex.Message}", "错误",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // 添加第二个 LinkLabel 控件（假设命名为 lk_QQGroup）
+        private void lk_QQGroup_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            string groupNumber = lk_QQGroup.Text;   // 例如：123456789
+
+            string url = $"http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=D6PkzL9J67rjSKOFjH7FuLBNFlsE_GVe&authKey=tms7jm6kh844bBlq0fx4y3lUbHhwssJ75XbuvJK%2BBALqEKiua0%2FMG%2BXCyQSLDMvU&noverify=0&group_code={groupNumber}";
+
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true,        // ← 关键！必须设为 true
+                    Verb = "open"
+                };
+
+                Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("打开QQ群失败：\n" + ex.Message +
+                               "\n\n请确认已安装QQ客户端并登录！");
+            }
+        }
     }
 }
