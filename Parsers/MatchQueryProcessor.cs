@@ -171,8 +171,82 @@ namespace League.Parsers
                 IsPublic = privacyStatus
             };
 
+            // 计算玩家是否压力怪
+            CalculatePlayerBehavior(result);
+
             _cacheManager.CachePlayerMatch(summonerId, result);
             return result;
+        }
+
+        private void CalculatePlayerBehavior(PlayerMatchInfo info)
+        {
+            if (info?.RecentMatches == null || info.RecentMatches.Count == 0)
+                return;
+
+            int surrenderCount = 0;
+            int totalMissing = 0;
+            int totalVision = 0;
+            int totalGetBack = 0;
+            int totalDanger = 0;
+            int shortCount = 0;
+
+            foreach (var m in info.RecentMatches)
+            {
+                if (m.GameEndedInSurrender || m.GameEndedInEarlySurrender)
+                    surrenderCount++;
+
+                if (m.GameDurationMinutes < 18)
+                    shortCount++;
+
+                totalMissing += m.EnemyMissingPings;
+                totalVision += m.EnemyVisionPings;
+                totalGetBack += m.GetBackPings;
+                totalDanger += m.DangerPings;
+            }
+
+            int count = info.RecentMatches.Count;
+            var b = info.Behavior;
+
+            b.SurrenderRate = Math.Round(surrenderCount * 100.0 / count, 1);
+            // 使用 double 除法
+            b.AvgMissingPings = totalMissing / (double)count;
+            b.AvgVisionPings = totalVision / (double)count;
+            b.AvgGetBackPings = totalGetBack / (double)count;
+            b.AvgDangerPings = totalDanger / (double)count;
+
+            b.ShortGameCount = shortCount;
+
+            string currentQueueId = Globals.CurrGameMod ?? "";
+            b.BehaviorSummary = GenerateBehaviorSummary(b, currentQueueId);
+        }
+
+        private string GenerateBehaviorSummary(PlayerBehavior b, string queueIdStr = "")
+        {
+            var tags = new List<string>();
+
+            // 投降
+            if (b.SurrenderRate >= 38) tags.Add("爱投降");
+            else if (b.SurrenderRate >= 25) tags.Add("容易投降");
+
+            // 单个信号
+            if (b.AvgMissingPings >= 3.0) tags.Add("爱发问号");
+            if (b.AvgVisionPings >= 2.5) tags.Add("爱发提醒");
+            if (b.AvgGetBackPings >= 3.5) tags.Add("爱发撤退");
+            if (b.AvgDangerPings >= 2.5) tags.Add("爱发危险");
+
+            // 综合性格（优先级最高）
+            double totalPressure = b.AvgMissingPings + b.AvgVisionPings + b.AvgGetBackPings + b.AvgDangerPings;
+
+            if (totalPressure >= 13 || b.AvgGetBackPings >= 4)
+                tags.Add("玻璃心");
+            else if (totalPressure >= 9)
+                tags.Add("心态容易崩");
+
+            if (b.AvgGetBackPings >= 4.5 && totalPressure >= 11)
+                tags.Add("爱抱怨");
+
+            var uniqueTags = tags.Distinct().ToList();
+            return uniqueTags.Count > 0 ? $"[{string.Join("、", uniqueTags)}]" : "";
         }
 
         /// <summary>

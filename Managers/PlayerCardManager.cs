@@ -110,42 +110,7 @@ namespace League.Managers
             }
         }
 
-        //public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
-        //{
-        //    if (teamOne == null || teamTwo == null) return;
-
-        //    await _uiManager._uiLock.WaitAsync();
-        //    try
-        //    {
-        //        var cardsNeedFix = _validator.GetCardsNeedCompletion();
-        //        if (cardsNeedFix.Count == 0) return;
-
-        //        foreach (var cardInfo in cardsNeedFix)
-        //        {
-        //            if (cardInfo.SummonerId == 0)
-        //            {
-        //                _validator.FixHiddenPlayerCard(cardInfo.Card);
-        //                continue;
-        //            }
-
-        //            var playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
-        //            if (playerData == null) continue;
-
-        //            var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData);
-        //            if (matchInfo?.Player != null)
-        //            {
-        //                _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
-        //                _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
-        //            }
-
-        //            await Task.Delay(150);
-        //        }
-        //    }
-        //    finally
-        //    {
-        //        _uiManager._uiLock.Release();
-        //    }
-        //}
+        
         public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
         {
             if (teamOne == null || teamTwo == null) return;

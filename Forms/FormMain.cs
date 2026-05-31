@@ -302,6 +302,9 @@ namespace League
             Globals.CurrentPuuid = summoner["puuid"]?.ToString() ?? "";
             Globals.CurrentSummonerName = summoner["gameName"]?.ToString();
 
+            // 把自己的PUUID告诉消息构建器，用来过滤自己
+            _chatMessageBuilder?.SetMyPuuid(Globals.CurrentPuuid);
+
             Debug.WriteLine($"[InitializeDefaultTab] 当前玩家 PUUID: {Globals.CurrentPuuid}");
 
             var rankedStats = await GetRankedStatsAsync(summoner["puuid"]?.ToString() ?? "");

@@ -59,7 +59,45 @@ namespace League.Parsers
                 ? DateTimeOffset.FromUnixTimeMilliseconds(gameStart).ToString("yyyy-MM-dd")
                 : "未知";
 
-            result.RecentMatches.Add(new MatchStat { Kills = kills, Deaths = deaths, Assists = assists });
+            int gameDurationSeconds = gameJson["gameDuration"]?.Value<int>()
+                       ?? gameJson["gameLength"]?.Value<int>()
+                       ?? 0;
+
+            int durationMinutes = gameDurationSeconds > 0 ? gameDurationSeconds / 60 : 0;
+            bool gameEndedInSurrender = gameJson["gameEndedInSurrender"]?.Value<bool>() ?? false;
+            bool gameEndedInEarlySurrender = gameJson["gameEndedInEarlySurrender"]?.Value<bool>() ?? false;
+
+            int missingPings = participant["enemyMissingPings"]?.Value<int>() ?? 0;
+            int visionPings = participant["enemyVisionPings"]?.Value<int>() ?? 0;
+            int getBackPings = participant["getBackPings"]?.Value<int>() ?? 0;
+            int dangerPings = participant["dangerPings"]?.Value<int>() ?? 0;
+
+            //Debug.WriteLine(
+            //    $"[比赛调试] {participant["riotIdGameName"]?.ToString() ?? "未知"} | " +
+            //    $"Duration: {durationMinutes} | " +
+            //    $"Surrender: {gameEndedInSurrender} | " +
+            //    $"EarlySurrender: {gameEndedInEarlySurrender} | " +
+            //    $"Missing: {missingPings} | " +
+            //    $"Vision: {visionPings} | " +
+            //    $"GetBack: {getBackPings} | " +
+            //    $"Danger: {dangerPings}"
+            //);
+
+            result.RecentMatches.Add(new MatchStat
+            {
+                Kills = kills,
+                Deaths = deaths,
+                Assists = assists,
+
+                GameEndedInSurrender = gameEndedInSurrender,
+                GameEndedInEarlySurrender = gameEndedInEarlySurrender,
+                GameDurationMinutes = durationMinutes,
+
+                EnemyMissingPings = missingPings,
+                EnemyVisionPings = visionPings,
+                GetBackPings = getBackPings,
+                DangerPings = dangerPings
+            });
             result.WinHistory.Add(isWin);
 
             var item = new ListViewItem

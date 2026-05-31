@@ -20,11 +20,23 @@
         public List<bool> WinHistory { get; set; } = new(); // 新增: 每场 true=胜利, false=失败
 
         public List<MatchStat> RecentMatches { get; set; } = new List<MatchStat>();
+
+        public PlayerBehavior Behavior { get; set; } = new PlayerBehavior();
     }
     public class MatchStat
     {
         public int Kills { get; set; }
         public int Deaths { get; set; }
         public int Assists { get; set; }
+
+        // 核心压力信号
+        public int EnemyMissingPings { get; set; }
+        public int EnemyVisionPings { get; set; }
+        public int GetBackPings { get; set; }
+        public int DangerPings { get; set; }
+
+        public bool GameEndedInSurrender { get; set; }
+        public bool GameEndedInEarlySurrender { get; set; }
+        public int GameDurationMinutes { get; set; }
     }
 }
