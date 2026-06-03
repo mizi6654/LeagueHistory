@@ -171,18 +171,6 @@ namespace League.Managers
             });
         }
 
-        //public void UpdatePlayerNameColor(long summonerId, Color color, PlayerCardCache cache)
-        //{
-        //    if (cache.TryGetCard(summonerId, out var card))
-        //    {
-        //        card.Invoke((MethodInvoker)(() =>
-        //        {
-        //            card.lblPlayerName.LinkColor = color;
-        //            card.lblPlayerName.VisitedLinkColor = color;
-        //            card.lblPlayerName.ActiveLinkColor = color;
-        //        }));
-        //    }
-        //}
         public void UpdatePlayerNameColor(long summonerId, Color color, PlayerCardCache cache)
         {
             if (color == default(Color) || summonerId <= 0)

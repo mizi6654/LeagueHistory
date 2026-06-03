@@ -41,14 +41,6 @@ namespace League.Managers
                 _cardBySummonerId[summonerId] = card;
         }
 
-        //public void UpdateCurrentChampion(long summonerId, int championId, int column)
-        //{
-        //    if (summonerId > 0)
-        //    {
-        //        _currentChampBySummoner[summonerId] = championId;
-        //        _summonerToColMap[summonerId] = column;
-        //    }
-        //}
         public void UpdateCurrentChampion(long summonerId, int championId, int column)
         {
             if (summonerId > 0 || championId > 0)  // 隐藏玩家也允许更新 championId

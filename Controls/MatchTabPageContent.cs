@@ -48,10 +48,6 @@ namespace League.Controls
         {
             InitializeComponent();
 
-            //this.Dock = DockStyle.Fill; // 这将使控件填充父容器
-            //this.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
-            //this.AutoScroll = true;
-
             // 确保在构造函数中设置正确的属性
             this.AutoScaleMode = AutoScaleMode.None;
             this.Dock = DockStyle.Fill;
@@ -505,40 +501,6 @@ namespace League.Controls
         }
 
         // 辅助方法：更新头像
-        //private async Task UpdateProfileIcon(int iconId)
-        //{
-        //    try
-        //    {
-        //        // 清理旧图片
-        //        if (picChampionId.Image != null)
-        //        {
-        //            var oldImage = picChampionId.Image;
-        //            picChampionId.Image = null;
-
-        //            // 延迟释放，避免立即释放导致的问题
-        //            _ = Task.Delay(100).ContinueWith(_ =>
-        //            {
-        //                try
-        //                {
-        //                    oldImage?.Dispose();
-        //                }
-        //                catch { }
-        //            });
-        //        }
-
-        //        // 加载新图片
-        //        var image = await Profileicon.GetProfileIconAsync(iconId);
-        //        if (image != null)
-        //        {
-        //            picChampionId.Image = image;
-        //            picChampionId.Tag = iconId.ToString(); // 保存当前头像ID
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Debug.WriteLine($"[更新头像异常] {ex.Message}");
-        //    }
-        //}
         private async Task UpdateProfileIcon(int iconId)
         {
             if (iconId <= 0) return;
