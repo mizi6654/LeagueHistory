@@ -85,7 +85,6 @@ namespace League.Services
             _lastTeamStructureSnapshot = structureSnapshot;
             _lastChampSelectSnapshotString = heroSnapshot;
 
-            _form._cachedMyTeam = myTeam;
             _form.lastChampSelectSnapshotString = heroSnapshot;
 
             Debug.WriteLine($"[TeamCardDisplay] 我方更新 | 结构变化:{structureChanged} | 英雄变化:{heroChanged}");
@@ -99,6 +98,8 @@ namespace League.Services
             {
                 await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
             }
+
+            _form._cachedMyTeam = myTeam;
         }
 
         public async Task ShowEnemyTeamCardsAsync()
@@ -136,10 +137,12 @@ namespace League.Services
                 JArray enemyTeam = isInTeamOne ? teamTwo : teamOne;
                 int enemyRow = isInTeamOne ? 1 : 0;
 
-                _form._cachedEnemyTeam = enemyTeam;
+                
 
                 await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
                 await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
+
+                _form._cachedEnemyTeam = enemyTeam;
 
                 await Task.Delay(700);
                 await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);

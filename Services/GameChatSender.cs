@@ -1,4 +1,5 @@
 ﻿using League.Extensions;
+using League.Models;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using static League.FormMain;
@@ -8,8 +9,11 @@ namespace League.Services
     public class GameChatSender
     {
         private readonly FormMain _mainForm;
-        private readonly ChatMessageBuilder? _chatMessageBuilder;
+        private ChatMessageBuilder? _chatMessageBuilder;
         private bool _isSendingMessage = false;
+
+        private const int MaxWaitMs = 1000;
+        private const int RetryIntervalMs = 350;
 
         public GameChatSender(FormMain mainForm, ChatMessageBuilder? chatMessageBuilder)
         {
@@ -17,15 +21,17 @@ namespace League.Services
             _chatMessageBuilder = chatMessageBuilder;
         }
 
-        // 🔥 Ctrl + F7 - 选人阶段发送（保持不变）
+        public void SetChatMessageBuilder(ChatMessageBuilder chatMessageBuilder)
+        {
+            _chatMessageBuilder = chatMessageBuilder ?? throw new ArgumentNullException(nameof(chatMessageBuilder));
+            Debug.WriteLine("[GameChatSender] ChatMessageBuilder 已成功设置");
+        }
+
+        // Ctrl + F7 - 选人阶段
         public async Task HandleChampSelectF7Async()
         {
             string phase = await GetGameflowPhaseSafeAsync();
-            if (phase != "ChampSelect")
-            {
-                Debug.WriteLine($"[Ctrl+F7] 当前不是选人阶段: {phase}");
-                return;
-            }
+            if (phase != "ChampSelect") return;
 
             var (isCustomMode, msg) = await GetUiSendStateAsync();
 
@@ -34,62 +40,64 @@ namespace League.Services
                 var myTeam = _mainForm._cachedMyTeam;
                 if (myTeam == null || myTeam.Count == 0)
                 {
-                    Debug.WriteLine("[Ctrl+F7] 缓存为空，尝试实时获取");
                     var session = await Globals.lcuClient.GetChampSelectSession();
                     if (session != null) _mainForm._cachedMyTeam = session["myTeam"] as JArray;
                     myTeam = _mainForm._cachedMyTeam;
                 }
 
-                if (myTeam == null || myTeam.Count == 0)
-                {
-                    Debug.WriteLine("[Ctrl+F7] 仍无法获取我方队伍数据");
-                    return;
-                }
-                msg = _chatMessageBuilder?.BuildMyTeamSummary(myTeam) ?? "";
+                if (myTeam == null || myTeam.Count == 0) return;
+
+                // 选人阶段强制使用玩家名称（英雄未锁定）
+                msg = _chatMessageBuilder?.BuildMyTeamSummary(myTeam, useChampionName: false) ?? "";
             }
 
             await SendMessageAsync(msg, isChampSelect: true);
         }
 
-        // 🔥 F9 - 发送我方队伍
         public async Task HandleMyTeamAsync()
+        {
+            if (_isSendingMessage) return;
+            await SendTeamDataAsync(isFullTeam: false);
+        }
+
+        public async Task HandleFullTeamAsync()
+        {
+            await SendTeamDataAsync(isFullTeam: true);
+        }
+
+        private async Task SendTeamDataAsync(bool isFullTeam)
         {
             if (_isSendingMessage) return;
 
             string phase = await GetGameflowPhaseSafeAsync();
-            if (phase != "InProgress")
+            if (phase != "InProgress") return;
+
+            var (isCustomMode, msg) = await GetUiSendStateAsync();
+            if (isCustomMode)
             {
-                Debug.WriteLine($"[F9] 非游戏阶段: {phase}");
+                await SendMessageAsync(msg, false);
                 return;
             }
 
-            var (isCustomMode, msg) = await GetUiSendStateAsync();
+            var config = _mainForm.GetAppConfig();
+            bool useChampionName = config?.UseChampionNameWhenSending ?? true;
 
-            if (!isCustomMode)
-            {
-                var myTeam = _mainForm._cachedMyTeam;
-                if (myTeam == null || myTeam.Count == 0)
-                {
-                    Debug.WriteLine("[F9] 缓存为空，尝试从Session获取");
-                    var session = await Globals.lcuClient.GetChampSelectSession();
-                    if (session != null) _mainForm._cachedMyTeam = session["myTeam"] as JArray;
-                    myTeam = _mainForm._cachedMyTeam;
-                }
+            JArray? myTeam = await EnsureTeamDataReadyAsync(_mainForm._cachedMyTeam, true);
+            JArray? enemyTeam = isFullTeam ? await EnsureTeamDataReadyAsync(_mainForm._cachedEnemyTeam, false) : null;
 
-                if (myTeam == null || myTeam.Count == 0)
-                {
-                    Debug.WriteLine("[F9] 无法获取我方队伍");
-                    return;
-                }
-                msg = _chatMessageBuilder?.BuildMyTeamSummary(myTeam) ?? "";
-            }
+            if (myTeam?.Count == 0 || (isFullTeam && enemyTeam?.Count == 0))
+                return;
+
+            msg = isFullTeam
+                ? _chatMessageBuilder?.BuildFullTeamSummary(myTeam, enemyTeam, useChampionName) ?? ""
+                : _chatMessageBuilder?.BuildMyTeamSummary(myTeam, useChampionName) ?? "";
 
             if (string.IsNullOrWhiteSpace(msg)) return;
 
             try
             {
                 _isSendingMessage = true;
-                await SendMessageAsync(msg, isChampSelect: false);
+                await SendMessageAsync(msg, false);
             }
             finally
             {
@@ -97,51 +105,52 @@ namespace League.Services
             }
         }
 
-        // 🔥 F11 - 发送全队信息（原F12功能）
-        public async Task HandleFullTeamAsync()
+        private async Task<JArray?> EnsureTeamDataReadyAsync(JArray? team, bool isMyTeam)
         {
-            string phase = await GetGameflowPhaseSafeAsync();
-            if (phase != "InProgress")
+            if (team == null || team.Count == 0)
             {
-                Debug.WriteLine($"[F11] 非游戏阶段: {phase}");
-                return;
+                var session = await Globals.lcuClient.GetGameSession();
+                if (session != null)
+                {
+                    team = isMyTeam ? session["gameData"]?["teamOne"] as JArray : session["gameData"]?["teamTwo"] as JArray;
+                }
             }
 
-            var (isCustomMode, msg) = await GetUiSendStateAsync();
+            if (team == null || team.Count == 0) return null;
 
-            if (!isCustomMode)
+            var start = DateTime.Now;
+            int attempt = 0;
+            int readyCount = 0;
+
+            while ((DateTime.Now - start).TotalMilliseconds < MaxWaitMs)
             {
-                var myTeam = _mainForm._cachedMyTeam;
-                var enemyTeam = _mainForm._cachedEnemyTeam;
+                attempt++;
+                var infos = _mainForm._playerCardManager?.GetAllCachedPlayerInfos() ?? new Dictionary<long, PlayerMatchInfo>();
 
-                if (myTeam?.Count == 0 || enemyTeam?.Count == 0)
+                readyCount = 0;
+                foreach (var p in team)
                 {
-                    Debug.WriteLine("[F11] 缓存为空，尝试从GameSession获取");
-                    var session = await Globals.lcuClient.GetGameSession();
-                    if (session != null)
-                    {
-                        myTeam = session["gameData"]?["teamOne"] as JArray;
-                        enemyTeam = session["gameData"]?["teamTwo"] as JArray;
-                        _mainForm._cachedMyTeam = myTeam;
-                        _mainForm._cachedEnemyTeam = enemyTeam;
-                    }
+                    long sid = p["summonerId"]?.Value<long>() ?? 0;
+                    if (sid != 0 && infos.ContainsKey(sid))
+                        readyCount++;
                 }
 
-                if (myTeam?.Count > 0 != true || enemyTeam?.Count > 0 != true)
+                if (readyCount == team.Count)
                 {
-                    Debug.WriteLine("[F11] 仍无法获取队伍数据");
-                    return;
+                    Debug.WriteLine($"[Ensure] {(isMyTeam ? "我方" : "敌方")} 数据完全就绪！");
+                    return team;
                 }
 
-                msg = _chatMessageBuilder?.BuildFullTeamSummary(myTeam, enemyTeam) ?? "";
+                if (attempt % 6 == 0)
+                    Debug.WriteLine($"[Ensure] {(isMyTeam ? "我方" : "敌方")} 等待中... {readyCount}/{team.Count}");
+
+                await Task.Delay(RetryIntervalMs);
             }
 
-            await SendMessageAsync(msg, isChampSelect: false);
+            Debug.WriteLine($"[Ensure] {(isMyTeam ? "我方" : "敌方")} 等待超时，最终就绪 {readyCount}/{team.Count}");
+            return team;
         }
 
-        /// <summary>
-        /// 从 UI 线程安全获取发送模式和消息内容
-        /// </summary>
         private async Task<(bool isCustomMode, string msg)> GetUiSendStateAsync()
         {
             bool isCustomMode = false;
@@ -158,18 +167,13 @@ namespace League.Services
 
         private async Task SendMessageAsync(string msg, bool isChampSelect)
         {
-            if (string.IsNullOrWhiteSpace(msg))
-            {
-                Debug.WriteLine("[消息发送] 发送内容为空，取消发送");
-                return;
-            }
+            if (string.IsNullOrWhiteSpace(msg)) return;
 
             bool success = isChampSelect
                 ? await Globals.lcuClient.SendChampSelectMessageAsync(msg)
                 : await Globals.lcuClient.SendInGameMessageAsync(msg);
 
-            string type = isChampSelect ? "选人阶段" : "游戏内";
-            Debug.WriteLine($"[消息发送] {type} 发送 {(success ? "成功" : "失败")}");
+            Debug.WriteLine($"[消息发送] {(isChampSelect ? "选人阶段" : "游戏内")} 发送 {(success ? "成功" : "失败")}");
         }
 
         private async Task<string> GetGameflowPhaseSafeAsync()

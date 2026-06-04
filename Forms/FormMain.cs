@@ -91,7 +91,9 @@ namespace League
             _matchDetailManager = new MatchDetailManager(this);
 
             // 初始化按键消息预处理
-            _chatMessageBuilder = new ChatMessageBuilder(_playerCardManager.GetAllCachedPlayerInfos);
+            //_chatMessageBuilder = new ChatMessageBuilder(_playerCardManager.GetAllCachedPlayerInfos, null!);
+            // ★★★ 修改为先传 null ★★★
+            _chatMessageBuilder = null;  // 或者 new ChatMessageBuilder(..., null!) 但建议直接 null
 
             // 热键管理
             _hotkeyManager = new HotkeyManager(this);
@@ -143,6 +145,8 @@ namespace League
                 chkAram.Checked = _appConfig.EnablePreliminaryInAram;       //大乱斗
                 chkNexus.Checked = _appConfig.EnablePreliminaryInNexusBlitz;    //海克斯乱斗
                 chkAutoAccept.Checked = _appConfig.EnableAutoAcceptQueue;   // 在恢复其他复选框的位置添加
+                chkHideSelf.Checked = _appConfig.HideSelfWhenSending;   //发送战绩时是否隐藏自己
+                chkUseChampionName.Checked = _appConfig.UseChampionNameWhenSending; //发送战绩时是否使用英雄名称
 
                 // 根据配置文件恢复消息发送信息 ===
                 if (rbModeMatch != null && rbModeCustom != null && txtCustomContent != null)
@@ -176,6 +180,8 @@ namespace League
                 chkAram.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkNexus.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkAutoAccept.CheckedChanged += AutoAccept_CheckedChanged;
+                chkHideSelf.CheckedChanged += HideSelf_CheckedChanged;
+                chkUseChampionName.CheckedChanged += UseChampionName_CheckedChanged;
 
                 // 启动轮询 LCU 检测
                 StartLcuConnectPolling();
@@ -238,6 +244,21 @@ namespace League
                 {
                     Debug.WriteLine($"[英雄预加载] 失败: {ex.Message}");
                 }
+            }
+
+            // ★★★ 关键修改：在这里创建 ChatMessageBuilder ★★★
+            if (_chatMessageBuilder == null && _championManager != null)
+            {
+                _chatMessageBuilder = new ChatMessageBuilder(
+                    _playerCardManager.GetAllCachedPlayerInfos,
+                    _championManager!,
+                    _appConfig.HideSelfWhenSending
+                );
+
+                // 更新 GameChatSender
+                _chatSender?.SetChatMessageBuilder(_chatMessageBuilder);
+
+                Debug.WriteLine("[ChatMessageBuilder] 已成功延迟创建并注入 ChampionManager");
             }
 
             // 初始化SGP
@@ -692,6 +713,22 @@ namespace League
 
             // 存盘
             SaveAppConfig();
+        }
+
+        private void HideSelf_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_appConfig == null) return;
+            _appConfig.HideSelfWhenSending = chkHideSelf.Checked;
+            SaveAppConfig();
+            Debug.WriteLine($"[发送配置] 隐藏自己 已更新: {_appConfig.HideSelfWhenSending}");
+        }
+
+        private void UseChampionName_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_appConfig == null) return;
+            _appConfig.UseChampionNameWhenSending = chkUseChampionName.Checked;
+            SaveAppConfig();
+            Debug.WriteLine($"[发送配置] 使用英雄名称 已更新: {_appConfig.UseChampionNameWhenSending}");
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

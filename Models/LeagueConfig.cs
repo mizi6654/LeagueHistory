@@ -40,5 +40,15 @@ namespace League.Models
         /// 是否启用自动接受对局（Ready Check）
         /// </summary>
         public bool EnableAutoAcceptQueue { get; set; } = false;
+
+        /// <summary>
+        /// 发送战绩时是否隐藏自己
+        /// </summary>
+        public bool HideSelfWhenSending { get; set; } = true;   // 默认隐藏自己
+
+        /// <summary>
+        /// 发送战绩时是否使用英雄名称代替玩家名称
+        /// </summary>
+        public bool UseChampionNameWhenSending { get; set; } = true;  // 默认使用英雄名
     }
 }

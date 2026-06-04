@@ -57,6 +57,8 @@ namespace League
             lkbPreliminary = new LinkLabel();
             checkBoxFilterMode = new CheckBox();
             tabPage5 = new TabPage();
+            chkUseChampionName = new CheckBox();
+            chkHideSelf = new CheckBox();
             label3 = new Label();
             label2 = new Label();
             txtCustomContent = new TextBox();
@@ -358,6 +360,8 @@ namespace League
             // 
             // tabPage5
             // 
+            tabPage5.Controls.Add(chkUseChampionName);
+            tabPage5.Controls.Add(chkHideSelf);
             tabPage5.Controls.Add(label3);
             tabPage5.Controls.Add(label2);
             tabPage5.Controls.Add(txtCustomContent);
@@ -371,9 +375,29 @@ namespace League
             tabPage5.Text = "消息发送";
             tabPage5.UseVisualStyleBackColor = true;
             // 
+            // chkUseChampionName
+            // 
+            chkUseChampionName.AutoSize = true;
+            chkUseChampionName.Location = new Point(303, 28);
+            chkUseChampionName.Name = "chkUseChampionName";
+            chkUseChampionName.Size = new Size(243, 21);
+            chkUseChampionName.TabIndex = 6;
+            chkUseChampionName.Text = "发送时使用英雄名称（能防止名称屏蔽）";
+            chkUseChampionName.UseVisualStyleBackColor = true;
+            // 
+            // chkHideSelf
+            // 
+            chkHideSelf.AutoSize = true;
+            chkHideSelf.Location = new Point(17, 28);
+            chkHideSelf.Name = "chkHideSelf";
+            chkHideSelf.Size = new Size(135, 21);
+            chkHideSelf.TabIndex = 5;
+            chkHideSelf.Text = "发送战绩时隐藏自己";
+            chkHideSelf.UseVisualStyleBackColor = true;
+            // 
             // label3
             // 
-            label3.Location = new Point(710, 158);
+            label3.Location = new Point(706, 216);
             label3.Name = "label3";
             label3.Size = new Size(440, 67);
             label3.TabIndex = 4;
@@ -381,7 +405,7 @@ namespace League
             // 
             // label2
             // 
-            label2.Location = new Point(710, 43);
+            label2.Location = new Point(706, 101);
             label2.Name = "label2";
             label2.Size = new Size(440, 71);
             label2.TabIndex = 3;
@@ -389,27 +413,27 @@ namespace League
             // 
             // txtCustomContent
             // 
-            txtCustomContent.Location = new Point(138, 43);
+            txtCustomContent.Location = new Point(138, 101);
             txtCustomContent.Multiline = true;
             txtCustomContent.Name = "txtCustomContent";
-            txtCustomContent.Size = new Size(545, 668);
+            txtCustomContent.Size = new Size(545, 610);
             txtCustomContent.TabIndex = 2;
             // 
             // rbModeCustom
             // 
             rbModeCustom.AutoSize = true;
-            rbModeCustom.Location = new Point(138, 16);
+            rbModeCustom.Location = new Point(303, 74);
             rbModeCustom.Name = "rbModeCustom";
             rbModeCustom.Size = new Size(110, 21);
             rbModeCustom.TabIndex = 1;
-            rbModeCustom.TabStop = true;
             rbModeCustom.Text = "发送自定义信息";
             rbModeCustom.UseVisualStyleBackColor = true;
             // 
             // rbModeMatch
             // 
             rbModeMatch.AutoSize = true;
-            rbModeMatch.Location = new Point(17, 16);
+            rbModeMatch.Checked = true;
+            rbModeMatch.Location = new Point(17, 74);
             rbModeMatch.Name = "rbModeMatch";
             rbModeMatch.Size = new Size(98, 21);
             rbModeMatch.TabIndex = 0;
@@ -477,5 +501,7 @@ namespace League
         private Label label4;
         private LinkLabel lk_QQGroup;
         private Label label5;
+        private CheckBox chkUseChampionName;
+        private CheckBox chkHideSelf;
     }
 }
