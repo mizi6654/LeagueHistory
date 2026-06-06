@@ -1,4 +1,5 @@
-﻿using League.Managers;
+﻿using League.Infrastructure;
+using League.Managers;
 using League.UIState;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -137,7 +138,7 @@ namespace League.Services
                 JArray enemyTeam = isInTeamOne ? teamTwo : teamOne;
                 int enemyRow = isInTeamOne ? 1 : 0;
 
-                
+
 
                 await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
                 await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
@@ -205,11 +206,11 @@ namespace League.Services
             try
             {
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-                string debugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug_teams");
-                Directory.CreateDirectory(debugPath);
+                string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
+                Directory.CreateDirectory(DebugPath);
 
                 // 正确写法
-                File.WriteAllText(Path.Combine(debugPath, $"session_{timestamp}.json"),
+                File.WriteAllText(Path.Combine(DebugPath, $"session_{timestamp}.json"),
                     sessionData.ToString(Formatting.Indented));
 
                 Debug.WriteLine($"[Debug] 已保存 session_{timestamp}.json");

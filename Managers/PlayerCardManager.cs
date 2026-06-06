@@ -4,6 +4,7 @@ using League.Parsers;
 using League.Controls;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
+using League.Infrastructure;
 
 namespace League.Managers
 {
@@ -110,7 +111,7 @@ namespace League.Managers
             }
         }
 
-        
+
         public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
         {
             if (teamOne == null || teamTwo == null) return;
@@ -118,23 +119,23 @@ namespace League.Managers
             await _uiManager._uiLock.WaitAsync();
             try
             {
-                var cardsNeedFix = _validator.GetCardsNeedCompletion();
-                if (cardsNeedFix.Count == 0) return;
+                // 使用更强的 Force 方法
+                var cardsNeedFix = _validator.ForceGetAllCardsForCompletion();
+                if (cardsNeedFix.Count == 0)
+                {
+                    Debug.WriteLine("[Validate] 无需补全");
+                    return;
+                }
 
                 Debug.WriteLine($"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片");
 
                 foreach (var cardInfo in cardsNeedFix)
                 {
-                    JToken? playerData = null;
-
-                    if (cardInfo.SummonerId != 0)
+                    // 隐藏玩家直接跳过/修复
+                    if (cardInfo.SummonerId == 0 || string.IsNullOrEmpty(cardInfo.Puuid))
                     {
-                        playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
-                    }
-                    else
-                    {
-                        // 🔥 新增：SummonerId 为0时尝试用 Puuid 查找
-                        playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid); // 需要你传 Puuid
+                        _validator.FixHiddenPlayerCard(cardInfo.Card);
+                        continue;
                     }
 
                     JToken? playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid)
