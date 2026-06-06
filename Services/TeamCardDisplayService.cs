@@ -144,7 +144,12 @@ namespace League.Services
 
                 _form._cachedEnemyTeam = enemyTeam;
 
-                await Task.Delay(700);
+                // 增强补全
+                await Task.Delay(1000);  // 从700ms 增加到1000ms
+                await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
+
+                // 可选：再等一会再补一次（防网络慢）
+                await Task.Delay(800);
                 await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
             }
             catch (Exception ex)

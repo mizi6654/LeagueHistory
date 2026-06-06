@@ -110,7 +110,58 @@ namespace League.Managers
             }
         }
 
-        
+
+        //public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
+        //{
+        //    if (teamOne == null || teamTwo == null) return;
+
+        //    await _uiManager._uiLock.WaitAsync();
+        //    try
+        //    {
+        //        var cardsNeedFix = _validator.GetCardsNeedCompletion();
+        //        if (cardsNeedFix.Count == 0) return;
+
+        //        foreach (var cardInfo in cardsNeedFix)
+        //        {
+        //            JToken? playerData = null;
+
+        //            if (cardInfo.SummonerId != 0)
+        //            {
+        //                playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
+        //            }
+        //            else
+        //            {
+        //                // 🔥 新增：SummonerId 为0时尝试用 Puuid 查找
+        //                playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid); // 需要你传 Puuid
+        //            }
+
+        //            if (playerData == null)
+        //            {
+        //                _validator.FixHiddenPlayerCard(cardInfo.Card);
+        //                continue;
+        //            }
+
+        //            var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData);
+        //            if (matchInfo?.Player != null)
+        //            {
+        //                _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
+        //                _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
+        //                Debug.WriteLine($"[补全成功] {matchInfo.Player.GameName} (SID:{cardInfo.SummonerId})");
+        //            }
+        //            else
+        //            {
+        //                Debug.WriteLine($"[补全失败] Puuid: {cardInfo.Puuid}");
+        //            }
+
+        //            await Task.Delay(120);
+        //        }
+        //    }
+        //    finally
+        //    {
+        //        _uiManager._uiLock.Release();
+        //    }
+        //}
+
         public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
         {
             if (teamOne == null || teamTwo == null) return;
@@ -118,42 +169,51 @@ namespace League.Managers
             await _uiManager._uiLock.WaitAsync();
             try
             {
-                var cardsNeedFix = _validator.GetCardsNeedCompletion();
-                if (cardsNeedFix.Count == 0) return;
+                // 使用更强的 Force 方法
+                var cardsNeedFix = _validator.ForceGetAllCardsForCompletion();
+                if (cardsNeedFix.Count == 0)
+                {
+                    Debug.WriteLine("[Validate] 无需补全");
+                    return;
+                }
+
+                Debug.WriteLine($"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片");
 
                 foreach (var cardInfo in cardsNeedFix)
                 {
-                    JToken? playerData = null;
-
-                    if (cardInfo.SummonerId != 0)
-                    {
-                        playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
-                    }
-                    else
-                    {
-                        // 🔥 新增：SummonerId 为0时尝试用 Puuid 查找
-                        playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid); // 需要你传 Puuid
-                    }
-
-                    if (playerData == null)
+                    // 隐藏玩家直接跳过/修复
+                    if (cardInfo.SummonerId == 0 || string.IsNullOrEmpty(cardInfo.Puuid))
                     {
                         _validator.FixHiddenPlayerCard(cardInfo.Card);
                         continue;
                     }
 
+                    JToken? playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid)
+                                      ?? FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
+
+                    if (playerData == null)
+                    {
+                        Debug.WriteLine($"[补全] 找不到玩家数据 Puuid={cardInfo.Puuid}");
+                        continue;
+                    }
+
+                    // 重试查询
                     var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData);
-                    if (matchInfo?.Player != null)
+                    if (matchInfo?.Player != null && matchInfo.MatchItems?.Count > 0)
                     {
                         _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
                         _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
-                        Debug.WriteLine($"[补全成功] {matchInfo.Player.GameName} (SID:{cardInfo.SummonerId})");
+                        Debug.WriteLine($"[补全成功] {matchInfo.Player.GameName} 战绩项:{matchInfo.MatchItems.Count}");
                     }
                     else
                     {
-                        Debug.WriteLine($"[补全失败] Puuid: {cardInfo.Puuid}");
+                        // 仍失败则设为失败状态
+                        var failedInfo = _factory.CreateFailedPlayerInfo(cardInfo.SummonerId, cardInfo.ChampionId);
+                        _uiManager.UpdateCardUI(cardInfo.Card, failedInfo);
+                        Debug.WriteLine($"[补全失败] {cardInfo.CurrentName}");
                     }
 
-                    await Task.Delay(120);
+                    await Task.Delay(150); // 降低频率避免API限流
                 }
             }
             finally
