@@ -110,58 +110,7 @@ namespace League.Managers
             }
         }
 
-
-        //public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
-        //{
-        //    if (teamOne == null || teamTwo == null) return;
-
-        //    await _uiManager._uiLock.WaitAsync();
-        //    try
-        //    {
-        //        var cardsNeedFix = _validator.GetCardsNeedCompletion();
-        //        if (cardsNeedFix.Count == 0) return;
-
-        //        foreach (var cardInfo in cardsNeedFix)
-        //        {
-        //            JToken? playerData = null;
-
-        //            if (cardInfo.SummonerId != 0)
-        //            {
-        //                playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
-        //            }
-        //            else
-        //            {
-        //                // 🔥 新增：SummonerId 为0时尝试用 Puuid 查找
-        //                playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid); // 需要你传 Puuid
-        //            }
-
-        //            if (playerData == null)
-        //            {
-        //                _validator.FixHiddenPlayerCard(cardInfo.Card);
-        //                continue;
-        //            }
-
-        //            var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData);
-        //            if (matchInfo?.Player != null)
-        //            {
-        //                _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
-        //                _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
-        //                Debug.WriteLine($"[补全成功] {matchInfo.Player.GameName} (SID:{cardInfo.SummonerId})");
-        //            }
-        //            else
-        //            {
-        //                Debug.WriteLine($"[补全失败] Puuid: {cardInfo.Puuid}");
-        //            }
-
-        //            await Task.Delay(120);
-        //        }
-        //    }
-        //    finally
-        //    {
-        //        _uiManager._uiLock.Release();
-        //    }
-        //}
-
+        
         public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
         {
             if (teamOne == null || teamTwo == null) return;
@@ -169,23 +118,23 @@ namespace League.Managers
             await _uiManager._uiLock.WaitAsync();
             try
             {
-                // 使用更强的 Force 方法
-                var cardsNeedFix = _validator.ForceGetAllCardsForCompletion();
-                if (cardsNeedFix.Count == 0)
-                {
-                    Debug.WriteLine("[Validate] 无需补全");
-                    return;
-                }
+                var cardsNeedFix = _validator.GetCardsNeedCompletion();
+                if (cardsNeedFix.Count == 0) return;
 
                 Debug.WriteLine($"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片");
 
                 foreach (var cardInfo in cardsNeedFix)
                 {
-                    // 隐藏玩家直接跳过/修复
-                    if (cardInfo.SummonerId == 0 || string.IsNullOrEmpty(cardInfo.Puuid))
+                    JToken? playerData = null;
+
+                    if (cardInfo.SummonerId != 0)
                     {
-                        _validator.FixHiddenPlayerCard(cardInfo.Card);
-                        continue;
+                        playerData = FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
+                    }
+                    else
+                    {
+                        // 🔥 新增：SummonerId 为0时尝试用 Puuid 查找
+                        playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid); // 需要你传 Puuid
                     }
 
                     JToken? playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid)
