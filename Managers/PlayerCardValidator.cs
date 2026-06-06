@@ -1,6 +1,7 @@
 ﻿using League.Controls;
 using League.Models;
 using League.UIState;
+using System.ComponentModel.DataAnnotations;
 
 namespace League.Managers
 {
@@ -51,27 +52,25 @@ namespace League.Managers
             return result;
         }
 
+
         private bool CheckCardNeedsCompletion(PlayerCardControl card)
         {
-            if (card == null || card.IsDisposed) return true;
+            if (card == null || card.IsDisposed) return false;
 
-            string playerName = card.lblPlayerName.Text;
-            string soloRank = card.lblSoloRank.Text;
-            string flexRank = card.lblFlexRank.Text;
-            long summonerId = card.CurrentSummonerId;
+            string playerName = card.lblPlayerName.Text?.Trim() ?? "";
+            string soloRank = card.lblSoloRank.Text?.Trim() ?? "";
+            string privacy = card.lblPrivacyStatus.Text?.Trim() ?? "";
+            int listCount = card.ListViewControl?.Items.Count ?? 0;
 
-            if (summonerId == 0)
-                return playerName == "查询失败" || playerName == "失败";
-
-            if (playerName == "查询失败" || playerName == "失败" ||
-                playerName == "加载中..." || playerName.Contains("查询中"))
+            // 加载中 / 查询中 / 失败状态
+            if (playerName.Contains("加载中") || playerName.Contains("查询中") ||
+                playerName == "查询失败" || playerName == "失败" ||
+                soloRank.Contains("加载中") || soloRank == "失败" ||
+                privacy.Contains("查询中") || privacy == "[失败]")
                 return true;
 
-            if (soloRank == "失败" || soloRank == "加载中..." ||
-                flexRank == "失败" || flexRank == "加载中...")
-                return true;
-
-            if (card.ListViewControl.Items.Count == 0 && playerName != "隐藏玩家")
+            // 【核心】列表为空但不是隐藏玩家 → 需要补全
+            if (listCount == 0 && !playerName.Contains("隐藏"))
                 return true;
 
             return false;
@@ -91,6 +90,7 @@ namespace League.Managers
             });
         }
 
+
         public List<PlayerCardValidationInfo> ForceGetAllCardsForCompletion()
         {
             var result = new List<PlayerCardValidationInfo>();
@@ -107,19 +107,38 @@ namespace League.Managers
                             var card = panel.Controls[0] as PlayerCardControl;
                             if (card != null && !card.IsDisposed)
                             {
-                                // 只要战绩列表为空就认为需要补全（最关键条件）
-                                if (card.ListViewControl.Items.Count == 0 ||
-                                    card.lblSoloRank.Text.Contains("未知") ||
-                                    card.lblSoloRank.Text == "失败")
+                                bool needsFix = false;
+                                string name = card.lblPlayerName.Text?.Trim() ?? "";
+                                string rank = card.lblSoloRank.Text?.Trim() ?? "";
+                                int listCount = card.ListViewControl?.Items.Count ?? 0;
+
+                                // 核心条件：列表为空 或者 仍在 loading 状态
+                                if (listCount == 0 ||
+                                    name.Contains("加载中") || name.Contains("查询中") ||
+                                    rank.Contains("加载中") || rank == "未知" || rank == "失败")
+                                {
+                                    needsFix = true;
+                                }
+
+                                // 隐藏玩家特殊处理
+                                if (name.Contains("隐藏") || card.CurrentSummonerId == 0)
+                                {
+                                    if (listCount == 0)
+                                        //_validator.FixHiddenPlayerCard(card);  // 注意：这里要注入或直接调用
+                                    continue;
+                                }
+
+                                if (needsFix)
                                 {
                                     result.Add(new PlayerCardValidationInfo
                                     {
                                         SummonerId = card.CurrentSummonerId,
                                         ChampionId = card.CurrentChampionId,
+                                        Puuid = card.CurrentPuuId,
                                         Row = row,
                                         Column = col,
                                         Card = card,
-                                        CurrentName = card.lblPlayerName.Text
+                                        CurrentName = name
                                     });
                                 }
                             }
