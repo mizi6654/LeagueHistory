@@ -7,6 +7,9 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<ApplicationIcon>favicon.ico</ApplicationIcon>
 	</PropertyGroup>
+	<ItemGroup>
+	  <AdditionalFiles Remove="app.manifest" />
+	</ItemGroup>
 
 	<ItemGroup>
 	  <Content Include="favicon.ico" />
