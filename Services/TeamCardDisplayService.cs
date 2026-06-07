@@ -90,10 +90,29 @@ namespace League.Services
 
             Debug.WriteLine($"[TeamCardDisplay] 我方更新 | 结构变化:{structureChanged} | 英雄变化:{heroChanged}");
 
+            //if (structureChanged)
+            //{
+            //    await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
+            //    await _cardManager.FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
+
+            //}
+            //else if (heroChanged)
+            //{
+            //    await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
+            //}
+
             if (structureChanged)
             {
                 await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
                 await _cardManager.FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
+
+                // 【新增】我方队伍也进行补全兜底（重点解决隐藏玩家卡住问题）
+                await Task.Delay(800);
+                await _cardManager.ValidateAndCompleteAllCards(myTeam, _form._cachedEnemyTeam ?? new JArray());
+
+                // 二次补全（更保险）
+                await Task.Delay(600);
+                await _cardManager.ValidateAndCompleteAllCards(myTeam, _form._cachedEnemyTeam ?? new JArray());
             }
             else if (heroChanged)
             {

@@ -123,9 +123,11 @@ namespace League.Managers
                                 // 隐藏玩家特殊处理
                                 if (name.Contains("隐藏") || card.CurrentSummonerId == 0)
                                 {
-                                    if (listCount == 0)
-                                        //_validator.FixHiddenPlayerCard(card);  // 注意：这里要注入或直接调用
-                                        continue;
+                                    if (listCount == 0 || !name.Contains("隐藏"))  // 加强条件
+                                    {
+                                        FixHiddenPlayerCard(card);  // 直接调用 FixHiddenPlayerCard(card);
+                                    }
+                                    continue;  // 隐藏玩家不再加入补全列表（避免重复查询）
                                 }
 
                                 if (needsFix)
