@@ -18,8 +18,6 @@ namespace League
 {
     public partial class FormMain : Form
     {
-        // 添加 WebSocket 管理器
-        private LcuWebSocketManager? _webSocketManager;
 
         // 管理器实例
         private FormUiStateManager? _uiManager;
@@ -209,12 +207,6 @@ namespace League
                     {
                         _uiManager!.LcuReady = true;
                         _lcuPoller.Stop();
-
-                        // 在API连接成功后初始化WebSocket管理器
-                        _webSocketManager = new LcuWebSocketManager(Globals.lcuClient);
-                        bool wsInitialized = await _webSocketManager.InitializeAsync();
-
-                        Debug.WriteLine($"[WebSocket] 初始化{(wsInitialized ? "成功" : "失败")}");
 
                         // 初始化英雄资源，及查询SGP服务
                         await InitializeAfterLcuConnected();
@@ -741,9 +733,6 @@ namespace League
             _gameFlowWatcher?.StopGameflowWatcher();
             _lcuPoller?.Stop();
             _tab1Poller?.Stop();
-
-            // 清理WebSocket管理器
-            _webSocketManager?.Dispose();
 
             // 卸载热键钩子
             _hotkeyManager?.Dispose();

@@ -1,8 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Net.Http.Headers;
-using System.Text;
 using System.Text.RegularExpressions;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace League.Clients

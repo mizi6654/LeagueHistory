@@ -12,36 +12,6 @@ namespace League.Controls
 
         private MatchInfo _matchInfo;
 
-        private new const int Padding = 10;
-
-        private const int IconSize = 64;
-
-        private const int SpellSize = 30;
-
-        private const int SpellSpacing = 4;
-
-        private const int ItemSize = 30;
-
-        private const int ItemSpacing = 4;
-
-        private const int ModeWidth = 120;
-
-        private const int KdaX = 280;
-
-        private const int SpellStartX = 395;
-
-        private const int ItemsStartX = 260;
-
-        private const int emptyItemX = 190;
-
-        private const int ItemsYOffset = 30;
-
-        private const int TeamIconSize = 30;
-
-        private const int TeamIconSpacing = 2;
-
-        private const int TeamRowSpacing = 8;
-
         private Rectangle _detailsRect;
 
         private Rectangle _replayRect;
