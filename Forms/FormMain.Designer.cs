@@ -234,7 +234,7 @@ namespace League
             // lk_QQGroup
             // 
             lk_QQGroup.AutoSize = true;
-            lk_QQGroup.Location = new Point(74, 240);
+            lk_QQGroup.Location = new Point(74, 245);
             lk_QQGroup.Name = "lk_QQGroup";
             lk_QQGroup.Size = new Size(78, 17);
             lk_QQGroup.TabIndex = 11;
@@ -245,7 +245,7 @@ namespace League
             // label5
             // 
             label5.AutoSize = true;
-            label5.Location = new Point(16, 267);
+            label5.Location = new Point(16, 272);
             label5.Name = "label5";
             label5.Size = new Size(56, 17);
             label5.TabIndex = 10;
@@ -254,7 +254,7 @@ namespace League
             // lk_GitPro
             // 
             lk_GitPro.AutoSize = true;
-            lk_GitPro.Location = new Point(74, 267);
+            lk_GitPro.Location = new Point(74, 272);
             lk_GitPro.Name = "lk_GitPro";
             lk_GitPro.Size = new Size(264, 17);
             lk_GitPro.TabIndex = 9;
@@ -265,7 +265,7 @@ namespace League
             // label4
             // 
             label4.AutoSize = true;
-            label4.Location = new Point(32, 240);
+            label4.Location = new Point(32, 245);
             label4.Name = "label4";
             label4.Size = new Size(40, 17);
             label4.TabIndex = 8;
@@ -288,7 +288,7 @@ namespace League
             groupBox1.Controls.Add(chkRanked);
             groupBox1.Controls.Add(chkNormal);
             groupBox1.Controls.Add(lkbPreliminary);
-            groupBox1.Location = new Point(16, 93);
+            groupBox1.Location = new Point(16, 98);
             groupBox1.Name = "groupBox1";
             groupBox1.Size = new Size(363, 124);
             groupBox1.TabIndex = 6;

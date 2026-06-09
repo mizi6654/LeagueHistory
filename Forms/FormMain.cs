@@ -723,6 +723,7 @@ namespace League
             Debug.WriteLine($"[发送配置] 使用英雄名称 已更新: {_appConfig.UseChampionNameWhenSending}");
         }
 
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (_matchTabContent != null)

@@ -1,7 +1,6 @@
 ﻿using League.Controls;
 using League.Models;
 using League.UIState;
-using System.ComponentModel.DataAnnotations;
 
 namespace League.Managers
 {
@@ -53,6 +52,29 @@ namespace League.Managers
         }
 
 
+        //private bool CheckCardNeedsCompletion(PlayerCardControl card)
+        //{
+        //    if (card == null || card.IsDisposed) return false;
+
+        //    string playerName = card.lblPlayerName.Text?.Trim() ?? "";
+        //    string soloRank = card.lblSoloRank.Text?.Trim() ?? "";
+        //    string privacy = card.lblPrivacyStatus.Text?.Trim() ?? "";
+        //    int listCount = card.ListViewControl?.Items.Count ?? 0;
+
+        //    // 加载中 / 查询中 / 失败状态
+        //    if (playerName.Contains("加载中") || playerName.Contains("查询中") ||
+        //        playerName == "查询失败" || playerName == "失败" ||
+        //        soloRank.Contains("加载中") || soloRank == "失败" ||
+        //        privacy.Contains("查询中") || privacy == "[失败]")
+        //        return true;
+
+        //    // 【核心】列表为空但不是隐藏玩家 → 需要补全
+        //    if (listCount == 0 && !playerName.Contains("隐藏"))
+        //        return true;
+
+        //    return false;
+        //}
+
         private bool CheckCardNeedsCompletion(PlayerCardControl card)
         {
             if (card == null || card.IsDisposed) return false;
@@ -62,15 +84,31 @@ namespace League.Managers
             string privacy = card.lblPrivacyStatus.Text?.Trim() ?? "";
             int listCount = card.ListViewControl?.Items.Count ?? 0;
 
-            // 加载中 / 查询中 / 失败状态
-            if (playerName.Contains("加载中") || playerName.Contains("查询中") ||
-                playerName == "查询失败" || playerName == "失败" ||
-                soloRank.Contains("加载中") || soloRank == "失败" ||
-                privacy.Contains("查询中") || privacy == "[失败]")
+            // ==================== 加强版条件 ====================
+
+            // 明确的状态词
+            if (playerName.Contains("加载中") ||
+                playerName.Contains("查询中") ||
+                playerName == "查询失败" ||
+                playerName == "失败" ||
+                soloRank.Contains("加载中") ||
+                soloRank == "失败" ||
+                privacy.Contains("查询中") ||
+                privacy == "[失败]")
                 return true;
 
-            // 【核心】列表为空但不是隐藏玩家 → 需要补全
+            // 列表为空但不是隐藏玩家（核心条件）
             if (listCount == 0 && !playerName.Contains("隐藏"))
+                return true;
+
+            // 新增兜底：名字为空/未知 或 summonerId 为0 但没处理成隐藏
+            if (string.IsNullOrWhiteSpace(playerName) ||
+                playerName == "未知" ||
+                (card.CurrentSummonerId == 0 && !playerName.Contains("隐藏")))
+                return true;
+
+            // 新增：排行榜为空 + 名字看起来是正常玩家
+            if (listCount == 0 && playerName.Length > 1 && !playerName.Contains("隐藏"))
                 return true;
 
             return false;
@@ -91,6 +129,67 @@ namespace League.Managers
         }
 
 
+        //public List<PlayerCardValidationInfo> ForceGetAllCardsForCompletion()
+        //{
+        //    var result = new List<PlayerCardValidationInfo>();
+
+        //    FormUiStateManager.SafeInvoke(_form.tableLayoutPanel1, () =>
+        //    {
+        //        for (int row = 0; row < _form.tableLayoutPanel1.RowCount; row++)
+        //        {
+        //            for (int col = 0; col < _form.tableLayoutPanel1.ColumnCount; col++)
+        //            {
+        //                var panel = _form.tableLayoutPanel1.GetControlFromPosition(col, row) as BorderPanel;
+        //                if (panel?.Controls.Count > 0)
+        //                {
+        //                    var card = panel.Controls[0] as PlayerCardControl;
+        //                    if (card != null && !card.IsDisposed)
+        //                    {
+        //                        bool needsFix = false;
+        //                        string name = card.lblPlayerName.Text?.Trim() ?? "";
+        //                        string rank = card.lblSoloRank.Text?.Trim() ?? "";
+        //                        int listCount = card.ListViewControl?.Items.Count ?? 0;
+
+        //                        // 核心条件：列表为空 或者 仍在 loading 状态
+        //                        if (listCount == 0 ||
+        //                            name.Contains("加载中") || name.Contains("查询中") ||
+        //                            rank.Contains("加载中") || rank == "未知" || rank == "失败")
+        //                        {
+        //                            needsFix = true;
+        //                        }
+
+        //                        // 隐藏玩家特殊处理
+        //                        if (name.Contains("隐藏") || card.CurrentSummonerId == 0)
+        //                        {
+        //                            if (listCount == 0 || !name.Contains("隐藏"))  // 加强条件
+        //                            {
+        //                                FixHiddenPlayerCard(card);  // 直接调用 FixHiddenPlayerCard(card);
+        //                            }
+        //                            continue;  // 隐藏玩家不再加入补全列表（避免重复查询）
+        //                        }
+
+        //                        if (needsFix)
+        //                        {
+        //                            result.Add(new PlayerCardValidationInfo
+        //                            {
+        //                                SummonerId = card.CurrentSummonerId,
+        //                                ChampionId = card.CurrentChampionId,
+        //                                Puuid = card.CurrentPuuId,
+        //                                Row = row,
+        //                                Column = col,
+        //                                Card = card,
+        //                                CurrentName = name
+        //                            });
+        //                        }
+        //                    }
+        //                }
+        //            }
+        //        }
+        //    });
+
+        //    return result;
+        //}
+
         public List<PlayerCardValidationInfo> ForceGetAllCardsForCompletion()
         {
             var result = new List<PlayerCardValidationInfo>();
@@ -105,44 +204,45 @@ namespace League.Managers
                         if (panel?.Controls.Count > 0)
                         {
                             var card = panel.Controls[0] as PlayerCardControl;
-                            if (card != null && !card.IsDisposed)
+                            if (card == null || card.IsDisposed) continue;
+
+                            string name = card.lblPlayerName.Text?.Trim() ?? "";
+                            string rank = card.lblSoloRank.Text?.Trim() ?? "";
+                            int listCount = card.ListViewControl?.Items.Count ?? 0;
+
+                            // 隐藏玩家单独处理
+                            if (name.Contains("隐藏") || card.CurrentSummonerId == 0)
                             {
-                                bool needsFix = false;
-                                string name = card.lblPlayerName.Text?.Trim() ?? "";
-                                string rank = card.lblSoloRank.Text?.Trim() ?? "";
-                                int listCount = card.ListViewControl?.Items.Count ?? 0;
-
-                                // 核心条件：列表为空 或者 仍在 loading 状态
-                                if (listCount == 0 ||
-                                    name.Contains("加载中") || name.Contains("查询中") ||
-                                    rank.Contains("加载中") || rank == "未知" || rank == "失败")
+                                if (listCount == 0 || !name.Contains("隐藏"))
                                 {
-                                    needsFix = true;
+                                    FixHiddenPlayerCard(card);
                                 }
+                                continue; // 隐藏玩家不参与普通补全
+                            }
 
-                                // 隐藏玩家特殊处理
-                                if (name.Contains("隐藏") || card.CurrentSummonerId == 0)
-                                {
-                                    if (listCount == 0 || !name.Contains("隐藏"))  // 加强条件
-                                    {
-                                        FixHiddenPlayerCard(card);  // 直接调用 FixHiddenPlayerCard(card);
-                                    }
-                                    continue;  // 隐藏玩家不再加入补全列表（避免重复查询）
-                                }
+                            // 判断是否需要补全
+                            bool needsFix =
+                                listCount == 0 ||
+                                name.Contains("加载中") ||
+                                name.Contains("查询中") ||
+                                name == "未知" ||
+                                string.IsNullOrWhiteSpace(name) ||
+                                rank.Contains("加载中") ||
+                                rank == "失败" ||
+                                rank == "未知";
 
-                                if (needsFix)
+                            if (needsFix)
+                            {
+                                result.Add(new PlayerCardValidationInfo
                                 {
-                                    result.Add(new PlayerCardValidationInfo
-                                    {
-                                        SummonerId = card.CurrentSummonerId,
-                                        ChampionId = card.CurrentChampionId,
-                                        Puuid = card.CurrentPuuId,
-                                        Row = row,
-                                        Column = col,
-                                        Card = card,
-                                        CurrentName = name
-                                    });
-                                }
+                                    SummonerId = card.CurrentSummonerId,
+                                    ChampionId = card.CurrentChampionId,
+                                    Puuid = card.CurrentPuuId,
+                                    Row = row,
+                                    Column = col,
+                                    Card = card,
+                                    CurrentName = name
+                                });
                             }
                         }
                     }

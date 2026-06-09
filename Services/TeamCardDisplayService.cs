@@ -160,6 +160,10 @@ namespace League.Services
                 // 可选：再等一会再补一次（防网络慢）
                 await Task.Delay(800);
                 await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
+
+                // 游戏内敌方卡片最终兜底
+                await Task.Delay(800);
+                await _cardManager.StartFinalCardSweep();
             }
             catch (Exception ex)
             {

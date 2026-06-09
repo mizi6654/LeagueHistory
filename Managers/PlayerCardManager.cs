@@ -24,6 +24,8 @@ namespace League.Managers
         // 添加到 PlayerCardManager 类中
         public SemaphoreSlim UiLock => _uiManager._uiLock;
 
+        private System.Windows.Forms.Timer? _finalSweepTimer;
+
         public PlayerCardManager(FormMain form, MatchQueryProcessor matchQueryProcessor)
         {
             _form = form;
@@ -52,6 +54,79 @@ namespace League.Managers
             await _uiManager.CreateBasicCardsOnly(team, isMyTeam, row, _factory, _cache);
         }
 
+        //public async Task FillPlayerMatchInfoAsync(JArray team, bool isMyTeam, int row)
+        //{
+        //    if (team == null || team.Count == 0) return;
+
+        //    if ((DateTime.Now - _lastFillTime).TotalMilliseconds < 1200)
+        //        return;
+
+        //    _lastFillTime = DateTime.Now;
+
+        //    await _uiManager._uiLock.WaitAsync();
+        //    try
+        //    {
+        //        var fetchedInfos = await RunWithLimitedConcurrency(
+        //            team,
+        //            async p =>
+        //            {
+        //                long sid = p["summonerId"]?.Value<long>() ?? 0;
+        //                string puuid = p["puuid"]?.ToString() ?? "";
+        //                return sid == 0
+        //                    ? _factory.CreateHiddenPlayerInfo(0, p["championId"]?.Value<int>() ?? 0)
+        //                    : await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(p);
+        //            },
+        //            maxConcurrency: 3);
+
+        //        // 缓存正常玩家
+        //        foreach (var info in fetchedInfos)
+        //        {
+        //            if (info?.Player?.SummonerId > 0)
+        //                _cache.AddOrUpdateCache(info.Player.SummonerId, info);
+        //        }
+
+        //        // 【关键修复】UI 更新循环 - 加强隐藏玩家处理
+        //        int col = 0;
+        //        foreach (var info in fetchedInfos)
+        //        {
+        //            if (info == null)
+        //            {
+        //                col++;
+        //                continue;
+        //            }
+
+        //            if (info.Player?.SummonerId == 0)  // 隐藏玩家专用处理
+        //            {
+        //                // 确保隐藏玩家卡片也被正确更新
+        //                _uiManager.CreateLoadingPlayerMatch(info, isMyTeam, row, col, "");
+        //                col++;
+        //                continue;
+        //            }
+
+        //            if (info?.Player != null)
+        //            {
+        //                string puuid = info.Player.Puuid ?? "";
+        //                _uiManager.CreateLoadingPlayerMatch(info, isMyTeam, row, col, puuid);
+        //            }
+        //            col++;
+        //        }
+
+        //        // 组队检测
+        //        var detector = new PartyDetector();
+        //        detector.Detect(fetchedInfos.Where(f => f != null).ToList());
+
+        //        foreach (var info in fetchedInfos)
+        //        {
+        //            if (info?.Player != null)
+        //                _uiManager.UpdatePlayerNameColor(info.Player.SummonerId, info.Player.NameColor, _cache);
+        //        }
+        //    }
+        //    finally
+        //    {
+        //        _uiManager._uiLock.Release();
+        //    }
+        //}
+
         public async Task FillPlayerMatchInfoAsync(JArray team, bool isMyTeam, int row)
         {
             if (team == null || team.Count == 0) return;
@@ -64,12 +139,12 @@ namespace League.Managers
             await _uiManager._uiLock.WaitAsync();
             try
             {
+                // 并行查询（保持原逻辑）
                 var fetchedInfos = await RunWithLimitedConcurrency(
                     team,
                     async p =>
                     {
                         long sid = p["summonerId"]?.Value<long>() ?? 0;
-                        string puuid = p["puuid"]?.ToString() ?? "";
                         return sid == 0
                             ? _factory.CreateHiddenPlayerInfo(0, p["championId"]?.Value<int>() ?? 0)
                             : await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(p);
@@ -83,33 +158,36 @@ namespace League.Managers
                         _cache.AddOrUpdateCache(info.Player.SummonerId, info);
                 }
 
-                // 【关键修复】UI 更新循环 - 加强隐藏玩家处理
-                int col = 0;
-                foreach (var info in fetchedInfos)
+                // 【关键修复】UI 更新循环 - 按原始 team 顺序处理
+                for (int col = 0; col < team.Count; col++)
                 {
-                    if (info == null)
+                    var info = fetchedInfos[col];           // 对应位置的数据
+                    var playerData = team[col];             // 原始 JSON 数据（永远可用）
+
+                    if (info == null || info.Player == null)
                     {
-                        col++;
+                        // 🔥 从原始 team JSON 中取出 id
+                        long sid = playerData["summonerId"]?.Value<long>() ?? 0;
+                        int cid = playerData["championId"]?.Value<int>() ?? 0;
+
+                        var fallback = _factory.CreateFailedPlayerInfo(sid, cid);
+                        _uiManager.CreateLoadingPlayerMatch(fallback, isMyTeam, row, col, "");
+                        Debug.WriteLine($"[Fill] 强制失败兜底: sid={sid}, cid={cid}");
                         continue;
                     }
 
-                    if (info.Player?.SummonerId == 0)  // 隐藏玩家专用处理
+                    if (info.Player?.SummonerId == 0)  // 隐藏玩家
                     {
-                        // 确保隐藏玩家卡片也被正确更新
                         _uiManager.CreateLoadingPlayerMatch(info, isMyTeam, row, col, "");
-                        col++;
                         continue;
                     }
 
-                    if (info?.Player != null)
-                    {
-                        string puuid = info.Player.Puuid ?? "";
-                        _uiManager.CreateLoadingPlayerMatch(info, isMyTeam, row, col, puuid);
-                    }
-                    col++;
+                    // 正常玩家
+                    string puuid = info.Player.Puuid ?? "";
+                    _uiManager.CreateLoadingPlayerMatch(info, isMyTeam, row, col, puuid);
                 }
 
-                // 组队检测
+                // 组队检测 & 名字颜色
                 var detector = new PartyDetector();
                 detector.Detect(fetchedInfos.Where(f => f != null).ToList());
 
@@ -124,7 +202,6 @@ namespace League.Managers
                 _uiManager._uiLock.Release();
             }
         }
-
 
         public async Task ValidateAndCompleteAllCards(JArray teamOne, JArray teamTwo)
         {
@@ -251,5 +328,63 @@ namespace League.Managers
                 player = teamTwo?.FirstOrDefault(p => p["summonerId"]?.Value<long>() == summonerId);
             return player;
         }
+
+        #region 最终兜底补全卡片
+        public async Task StartFinalCardSweep()
+        {
+            _finalSweepTimer?.Stop();
+            _finalSweepTimer?.Dispose();
+
+            _finalSweepTimer = new System.Windows.Forms.Timer { Interval = 2500 };
+            _finalSweepTimer.Tick += async (s, e) =>
+            {
+                _finalSweepTimer.Stop();
+                _finalSweepTimer.Dispose();
+                _finalSweepTimer = null;
+
+                await ForceFixRemainingLoadingCards();
+            };
+
+            _finalSweepTimer.Start();
+            Debug.WriteLine("[FinalSweep] 已启动最终卡片兜底定时器（2.5秒后执行）");
+        }
+
+        private async Task ForceFixRemainingLoadingCards()
+        {
+            await _uiManager._uiLock.WaitAsync();
+            try
+            {
+                // 直接使用 validator 返回的结果（已经过滤好了）
+                var stillLoading = _validator.ForceGetAllCardsForCompletion();
+
+                if (stillLoading.Count == 0)
+                {
+                    Debug.WriteLine("[FinalSweep] ✅ 所有卡片状态正常，无需强制修复");
+                    return;
+                }
+
+                Debug.WriteLine($"[FinalSweep] ⚠️ 发现 {stillLoading.Count} 个残留问题卡片，正在强制修复...");
+
+                foreach (var info in stillLoading)
+                {
+                    var failedInfo = _factory.CreateFailedPlayerInfo(
+                        info.SummonerId,
+                        info.ChampionId);
+
+                    _uiManager.UpdateCardUI(info.Card, failedInfo);
+
+                    Debug.WriteLine($"[FinalSweep] 已强制修复 → {info.CurrentName ?? "未知"} (SID:{info.SummonerId})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[FinalSweep] 异常: {ex.Message}");
+            }
+            finally
+            {
+                _uiManager._uiLock.Release();
+            }
+        }
+        #endregion
     }
 }
