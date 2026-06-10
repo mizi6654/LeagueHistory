@@ -3,6 +3,7 @@ using League.Managers;
 using League.States;
 using League.UIState;
 using System.Diagnostics;
+using static League.FormMain;
 
 namespace League.Services
 {
@@ -14,6 +15,7 @@ namespace League.Services
         private readonly FormMain _form;
         private readonly PlayerCardManager _cardManager;
         private readonly FormUiStateManager _uiManager;
+        private readonly EndGameActions? _endGameActions;
 
         private bool _gameEndHandled = false;
 
@@ -22,25 +24,65 @@ namespace League.Services
             _form = form;
             _cardManager = cardManager;
             _uiManager = uiManager;
+            _endGameActions = new EndGameActions(Globals.lcuClient);
         }
 
         public async Task HandleGameEndAsync(string? previousPhase)
         {
-            // 放宽条件
-            if (previousPhase == "InProgress" ||
-                previousPhase == "WaitingForStats" ||
-                previousPhase == "ChampSelect" ||
-                previousPhase == "EndOfGame" ||
-                previousPhase == "PreEndOfGame")
+            Debug.WriteLine($"[HandleGameEndAsync] 被调用 | previousPhase = {previousPhase}");
+
+            // ==================== 游戏结束检测 ====================
+            bool isGameEndTransition = previousPhase == "InProgress" ||
+                                       previousPhase == "WaitingForStats" ||
+                                       previousPhase == "ChampSelect" ||
+                                       previousPhase == "EndOfGame" ||
+                                       previousPhase == "PreEndOfGame";
+
+            if (!isGameEndTransition)
             {
-                if (_gameEndHandled)
+                return;
+            }
+
+            if (_gameEndHandled)
+            {
+                Debug.WriteLine("[HandleGameEndAsync] 已处理过，跳过重复执行");
+                return;
+            }
+
+            _gameEndHandled = true;
+
+            // ==================== 关键优化：尽早执行跳过 ====================
+            await ExecuteSkipActionsAsync();
+
+            // ==================== 原有清理逻辑（异步不阻塞跳过） ====================
+            _ = OnGameEnd();   // 使用 fire-and-forget，避免阻塞
+        }
+
+        /// <summary>
+        /// 尽早跳过点赞和结算界面
+        /// </summary>
+        private async Task ExecuteSkipActionsAsync()
+        {
+            var config = _form.GetAppConfig();
+            if (config == null) return;
+
+            try
+            {
+                if (config.EnableSkipHonor && _endGameActions != null)
                 {
-                    Debug.WriteLine("[HandleGameEndAsync] 已处理过，跳过重复执行");
-                    return;
+                    await Task.Delay(300);        // 进一步提前
+                    await _endGameActions.SkipHonorAsync();
                 }
 
-                _gameEndHandled = true;
-                await OnGameEnd();
+                if (config.EnableSkipEndOfGameStats && _endGameActions != null)
+                {
+                    await Task.Delay(300);        // 结算界面通常比点赞晚一点
+                    await _endGameActions.DismissEndOfGameStatsAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ExecuteSkipActionsAsync] 异常: {ex.Message}");
             }
         }
 
@@ -56,7 +98,7 @@ namespace League.Services
                 RefreshState.ForceMatchRefresh = true;
             }
 
-            await Task.Delay(1000);
+            await Task.Delay(800);   // 适当保留一点延迟给战绩刷新
 
             _form.InvokeIfRequired(async () =>
             {

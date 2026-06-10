@@ -50,5 +50,16 @@ namespace League.Models
         /// 发送战绩时是否使用英雄名称代替玩家名称
         /// </summary>
         public bool UseChampionNameWhenSending { get; set; } = true;  // 默认使用英雄名
+
+
+        /// <summary>
+        /// 自动跳过点赞界面
+        /// </summary>
+        public bool EnableSkipHonor { get; set; } = true;
+
+        /// <summary>
+        /// 自动跳过结算统计界面
+        /// </summary>
+        public bool EnableSkipEndOfGameStats { get; set; } = true;
     }
 }

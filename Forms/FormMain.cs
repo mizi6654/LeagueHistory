@@ -145,6 +145,8 @@ namespace League
                 chkAutoAccept.Checked = _appConfig.EnableAutoAcceptQueue;   // 在恢复其他复选框的位置添加
                 chkHideSelf.Checked = _appConfig.HideSelfWhenSending;   //发送战绩时是否隐藏自己
                 chkUseChampionName.Checked = _appConfig.UseChampionNameWhenSending; //发送战绩时是否使用英雄名称
+                chkSkipHonor.Checked = _appConfig.EnableSkipHonor;  //自动跳过点赞界面
+                chkSkipEndOfGameStats.Checked = _appConfig.EnableSkipEndOfGameStats;    //自动跳过结算统计界面
 
                 // 根据配置文件恢复消息发送信息 ===
                 if (rbModeMatch != null && rbModeCustom != null && txtCustomContent != null)
@@ -180,6 +182,8 @@ namespace League
                 chkAutoAccept.CheckedChanged += AutoAccept_CheckedChanged;
                 chkHideSelf.CheckedChanged += HideSelf_CheckedChanged;
                 chkUseChampionName.CheckedChanged += UseChampionName_CheckedChanged;
+                chkSkipHonor.CheckedChanged += ChkSkipHonor_CheckedChanged;
+                chkSkipEndOfGameStats.CheckedChanged += ChkSkipEndOfGameStats_CheckedChanged;
 
                 // 启动轮询 LCU 检测
                 StartLcuConnectPolling();
@@ -189,6 +193,7 @@ namespace League
                 Debug.WriteLine($"[全局初始化异常] {ex.Message}");
             }
         }
+
         #endregion
 
         #region LCU连接管理
@@ -721,6 +726,22 @@ namespace League
             _appConfig.UseChampionNameWhenSending = chkUseChampionName.Checked;
             SaveAppConfig();
             Debug.WriteLine($"[发送配置] 使用英雄名称 已更新: {_appConfig.UseChampionNameWhenSending}");
+        }
+
+        private void ChkSkipHonor_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (_appConfig == null) return;
+            _appConfig.EnableSkipHonor = chkSkipHonor.Checked;   
+            SaveAppConfig();
+            Debug.WriteLine($"[游戏结束配置] 跳过点赞界面 已更新: {_appConfig.EnableSkipHonor}");
+        }
+
+        private void ChkSkipEndOfGameStats_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (_appConfig == null) return;
+            _appConfig.EnableSkipEndOfGameStats = chkSkipEndOfGameStats.Checked;  
+            SaveAppConfig();
+            Debug.WriteLine($"[游戏结束配置] 跳过结算界面 已更新: {_appConfig.EnableSkipEndOfGameStats}");
         }
 
 

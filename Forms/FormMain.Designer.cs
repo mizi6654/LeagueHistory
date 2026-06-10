@@ -64,6 +64,8 @@ namespace League
             txtCustomContent = new TextBox();
             rbModeCustom = new RadioButton();
             rbModeMatch = new RadioButton();
+            chkSkipHonor = new CheckBox();
+            chkSkipEndOfGameStats = new CheckBox();
             panel1.SuspendLayout();
             imageTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
@@ -216,6 +218,8 @@ namespace League
             // 
             // tabPage4
             // 
+            tabPage4.Controls.Add(chkSkipEndOfGameStats);
+            tabPage4.Controls.Add(chkSkipHonor);
             tabPage4.Controls.Add(lk_QQGroup);
             tabPage4.Controls.Add(label5);
             tabPage4.Controls.Add(lk_GitPro);
@@ -234,7 +238,7 @@ namespace League
             // lk_QQGroup
             // 
             lk_QQGroup.AutoSize = true;
-            lk_QQGroup.Location = new Point(74, 245);
+            lk_QQGroup.Location = new Point(74, 301);
             lk_QQGroup.Name = "lk_QQGroup";
             lk_QQGroup.Size = new Size(78, 17);
             lk_QQGroup.TabIndex = 11;
@@ -245,7 +249,7 @@ namespace League
             // label5
             // 
             label5.AutoSize = true;
-            label5.Location = new Point(16, 272);
+            label5.Location = new Point(16, 328);
             label5.Name = "label5";
             label5.Size = new Size(56, 17);
             label5.TabIndex = 10;
@@ -254,7 +258,7 @@ namespace League
             // lk_GitPro
             // 
             lk_GitPro.AutoSize = true;
-            lk_GitPro.Location = new Point(74, 272);
+            lk_GitPro.Location = new Point(74, 328);
             lk_GitPro.Name = "lk_GitPro";
             lk_GitPro.Size = new Size(264, 17);
             lk_GitPro.TabIndex = 9;
@@ -265,7 +269,7 @@ namespace League
             // label4
             // 
             label4.AutoSize = true;
-            label4.Location = new Point(32, 245);
+            label4.Location = new Point(32, 301);
             label4.Name = "label4";
             label4.Size = new Size(40, 17);
             label4.TabIndex = 8;
@@ -288,7 +292,7 @@ namespace League
             groupBox1.Controls.Add(chkRanked);
             groupBox1.Controls.Add(chkNormal);
             groupBox1.Controls.Add(lkbPreliminary);
-            groupBox1.Location = new Point(16, 98);
+            groupBox1.Location = new Point(16, 154);
             groupBox1.Name = "groupBox1";
             groupBox1.Size = new Size(363, 124);
             groupBox1.TabIndex = 6;
@@ -441,6 +445,26 @@ namespace League
             rbModeMatch.Text = "发送战绩信息";
             rbModeMatch.UseVisualStyleBackColor = true;
             // 
+            // chkSkipHonor
+            // 
+            chkSkipHonor.AutoSize = true;
+            chkSkipHonor.Location = new Point(16, 100);
+            chkSkipHonor.Name = "chkSkipHonor";
+            chkSkipHonor.Size = new Size(123, 21);
+            chkSkipHonor.TabIndex = 12;
+            chkSkipHonor.Text = "自动跳过点赞界面";
+            chkSkipHonor.UseVisualStyleBackColor = true;
+            // 
+            // chkSkipEndOfGameStats
+            // 
+            chkSkipEndOfGameStats.AutoSize = true;
+            chkSkipEndOfGameStats.Location = new Point(232, 100);
+            chkSkipEndOfGameStats.Name = "chkSkipEndOfGameStats";
+            chkSkipEndOfGameStats.Size = new Size(147, 21);
+            chkSkipEndOfGameStats.TabIndex = 13;
+            chkSkipEndOfGameStats.Text = "自动跳过结算统计界面";
+            chkSkipEndOfGameStats.UseVisualStyleBackColor = true;
+            // 
             // FormMain
             // 
             AutoScaleDimensions = new SizeF(7F, 17F);
@@ -503,5 +527,7 @@ namespace League
         private Label label5;
         private CheckBox chkUseChampionName;
         private CheckBox chkHideSelf;
+        private CheckBox chkSkipEndOfGameStats;
+        private CheckBox chkSkipHonor;
     }
 }

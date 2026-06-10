@@ -4,7 +4,6 @@ using League.Parsers;
 using League.Controls;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
-using League.Infrastructure;
 
 namespace League.Managers
 {
@@ -54,78 +53,6 @@ namespace League.Managers
             await _uiManager.CreateBasicCardsOnly(team, isMyTeam, row, _factory, _cache);
         }
 
-        //public async Task FillPlayerMatchInfoAsync(JArray team, bool isMyTeam, int row)
-        //{
-        //    if (team == null || team.Count == 0) return;
-
-        //    if ((DateTime.Now - _lastFillTime).TotalMilliseconds < 1200)
-        //        return;
-
-        //    _lastFillTime = DateTime.Now;
-
-        //    await _uiManager._uiLock.WaitAsync();
-        //    try
-        //    {
-        //        var fetchedInfos = await RunWithLimitedConcurrency(
-        //            team,
-        //            async p =>
-        //            {
-        //                long sid = p["summonerId"]?.Value<long>() ?? 0;
-        //                string puuid = p["puuid"]?.ToString() ?? "";
-        //                return sid == 0
-        //                    ? _factory.CreateHiddenPlayerInfo(0, p["championId"]?.Value<int>() ?? 0)
-        //                    : await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(p);
-        //            },
-        //            maxConcurrency: 3);
-
-        //        // 缓存正常玩家
-        //        foreach (var info in fetchedInfos)
-        //        {
-        //            if (info?.Player?.SummonerId > 0)
-        //                _cache.AddOrUpdateCache(info.Player.SummonerId, info);
-        //        }
-
-        //        // 【关键修复】UI 更新循环 - 加强隐藏玩家处理
-        //        int col = 0;
-        //        foreach (var info in fetchedInfos)
-        //        {
-        //            if (info == null)
-        //            {
-        //                col++;
-        //                continue;
-        //            }
-
-        //            if (info.Player?.SummonerId == 0)  // 隐藏玩家专用处理
-        //            {
-        //                // 确保隐藏玩家卡片也被正确更新
-        //                _uiManager.CreateLoadingPlayerMatch(info, isMyTeam, row, col, "");
-        //                col++;
-        //                continue;
-        //            }
-
-        //            if (info?.Player != null)
-        //            {
-        //                string puuid = info.Player.Puuid ?? "";
-        //                _uiManager.CreateLoadingPlayerMatch(info, isMyTeam, row, col, puuid);
-        //            }
-        //            col++;
-        //        }
-
-        //        // 组队检测
-        //        var detector = new PartyDetector();
-        //        detector.Detect(fetchedInfos.Where(f => f != null).ToList());
-
-        //        foreach (var info in fetchedInfos)
-        //        {
-        //            if (info?.Player != null)
-        //                _uiManager.UpdatePlayerNameColor(info.Player.SummonerId, info.Player.NameColor, _cache);
-        //        }
-        //    }
-        //    finally
-        //    {
-        //        _uiManager._uiLock.Release();
-        //    }
-        //}
 
         public async Task FillPlayerMatchInfoAsync(JArray team, bool isMyTeam, int row)
         {
