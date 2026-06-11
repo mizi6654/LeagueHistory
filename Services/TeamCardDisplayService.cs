@@ -94,13 +94,8 @@ namespace League.Services
             {
                 await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
                 await _cardManager.FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
-
-                // 【新增】我方队伍也进行补全兜底（重点解决隐藏玩家卡住问题）
-                await Task.Delay(800);
-                await _cardManager.ValidateAndCompleteAllCards(myTeam, _form._cachedEnemyTeam ?? new JArray());
-
-                // 二次补全（更保险）
-                await Task.Delay(600);
+                // 一次补全即可（延迟可缩短至 500ms）
+                await Task.Delay(500);
                 await _cardManager.ValidateAndCompleteAllCards(myTeam, _form._cachedEnemyTeam ?? new JArray());
             }
             else if (heroChanged)
@@ -146,24 +141,13 @@ namespace League.Services
                 JArray enemyTeam = isInTeamOne ? teamTwo : teamOne;
                 int enemyRow = isInTeamOne ? 1 : 0;
 
-
-
                 await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
                 await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
-
                 _form._cachedEnemyTeam = enemyTeam;
 
-                // 增强补全
-                await Task.Delay(1000);  // 从700ms 增加到1000ms
+                // 单次补全 + 较短延迟
+                await Task.Delay(500);
                 await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
-
-                // 可选：再等一会再补一次（防网络慢）
-                await Task.Delay(800);
-                await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
-
-                // 游戏内敌方卡片最终兜底
-                await Task.Delay(800);
-                await _cardManager.StartFinalCardSweep();
             }
             catch (Exception ex)
             {

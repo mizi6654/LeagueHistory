@@ -23,8 +23,6 @@ namespace League.Managers
         // 添加到 PlayerCardManager 类中
         public SemaphoreSlim UiLock => _uiManager._uiLock;
 
-        private System.Windows.Forms.Timer? _finalSweepTimer;
-
         public PlayerCardManager(FormMain form, MatchQueryProcessor matchQueryProcessor)
         {
             _form = form;
@@ -120,6 +118,7 @@ namespace League.Managers
 
                 foreach (var info in fetchedInfos)
                 {
+                    if (info?.Player?.SummonerId == 0) continue; // 跳过隐藏玩家
                     if (info?.Player != null)
                         _uiManager.UpdatePlayerNameColor(info.Player.SummonerId, info.Player.NameColor, _cache);
                 }
@@ -255,63 +254,5 @@ namespace League.Managers
                 player = teamTwo?.FirstOrDefault(p => p["summonerId"]?.Value<long>() == summonerId);
             return player;
         }
-
-        #region 最终兜底补全卡片
-        public async Task StartFinalCardSweep()
-        {
-            _finalSweepTimer?.Stop();
-            _finalSweepTimer?.Dispose();
-
-            _finalSweepTimer = new System.Windows.Forms.Timer { Interval = 2500 };
-            _finalSweepTimer.Tick += async (s, e) =>
-            {
-                _finalSweepTimer.Stop();
-                _finalSweepTimer.Dispose();
-                _finalSweepTimer = null;
-
-                await ForceFixRemainingLoadingCards();
-            };
-
-            _finalSweepTimer.Start();
-            Debug.WriteLine("[FinalSweep] 已启动最终卡片兜底定时器（2.5秒后执行）");
-        }
-
-        private async Task ForceFixRemainingLoadingCards()
-        {
-            await _uiManager._uiLock.WaitAsync();
-            try
-            {
-                // 直接使用 validator 返回的结果（已经过滤好了）
-                var stillLoading = _validator.ForceGetAllCardsForCompletion();
-
-                if (stillLoading.Count == 0)
-                {
-                    Debug.WriteLine("[FinalSweep] ✅ 所有卡片状态正常，无需强制修复");
-                    return;
-                }
-
-                Debug.WriteLine($"[FinalSweep] ⚠️ 发现 {stillLoading.Count} 个残留问题卡片，正在强制修复...");
-
-                foreach (var info in stillLoading)
-                {
-                    var failedInfo = _factory.CreateFailedPlayerInfo(
-                        info.SummonerId,
-                        info.ChampionId);
-
-                    _uiManager.UpdateCardUI(info.Card, failedInfo);
-
-                    Debug.WriteLine($"[FinalSweep] 已强制修复 → {info.CurrentName ?? "未知"} (SID:{info.SummonerId})");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[FinalSweep] 异常: {ex.Message}");
-            }
-            finally
-            {
-                _uiManager._uiLock.Release();
-            }
-        }
-        #endregion
     }
 }

@@ -105,11 +105,12 @@ namespace League.Managers
             });
         }
 
+        // 同步更新UI，防止卡片显示不加载中
         public List<PlayerCardValidationInfo> ForceGetAllCardsForCompletion()
         {
             var result = new List<PlayerCardValidationInfo>();
 
-            FormUiStateManager.SafeInvoke(_form.tableLayoutPanel1, () =>
+            FormUiStateManager.SafeInvokeSync(_form.tableLayoutPanel1, () =>
             {
                 for (int row = 0; row < _form.tableLayoutPanel1.RowCount; row++)
                 {
@@ -125,26 +126,15 @@ namespace League.Managers
                             string rank = card.lblSoloRank.Text?.Trim() ?? "";
                             int listCount = card.ListViewControl?.Items.Count ?? 0;
 
-                            // 隐藏玩家单独处理
-                            if (name.Contains("隐藏") || card.CurrentSummonerId == 0)
-                            {
-                                if (listCount == 0 || !name.Contains("隐藏"))
-                                {
-                                    FixHiddenPlayerCard(card);
-                                }
-                                continue; // 隐藏玩家不参与普通补全
-                            }
-
-                            // 判断是否需要补全
-                            bool needsFix =
-                                listCount == 0 ||
-                                name.Contains("加载中") ||
-                                name.Contains("查询中") ||
-                                name == "未知" ||
-                                string.IsNullOrWhiteSpace(name) ||
-                                rank.Contains("加载中") ||
-                                rank == "失败" ||
-                                rank == "未知";
+                            bool needsFix = listCount == 0 ||
+                                            name.Contains("加载中") ||
+                                            name.Contains("查询中") ||
+                                            name == "未知" ||
+                                            string.IsNullOrWhiteSpace(name) ||
+                                            rank.Contains("加载中") ||
+                                            rank == "失败" ||
+                                            rank == "未知" ||
+                                            (card.CurrentSummonerId == 0 && !name.Contains("隐藏"));
 
                             if (needsFix)
                             {

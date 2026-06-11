@@ -168,11 +168,6 @@ namespace League.Services
         {
             _autoPickService.Stop();
             await _cardDisplayService.ShowEnemyTeamCardsAsync();
-
-            // 🔥 新增：游戏开始后最终兜底扫尾（最可靠的时机）
-            // 此时所有卡片创建 + Fill + Validate 都已完成
-            await Task.Delay(1200); // 给最后一次网络/异步一点缓冲
-            await _cardManager.StartFinalCardSweep();   // ← 在这里调用
         }
 
         private async Task HandleGameEnd(string? previousPhase)

@@ -1,6 +1,5 @@
 ﻿using League.Managers;
 using League.Models;
-using System.Drawing;
 using static League.FormMain;
 
 namespace League.Parsers

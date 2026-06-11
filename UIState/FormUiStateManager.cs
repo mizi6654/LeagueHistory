@@ -501,6 +501,23 @@ namespace League.UIState
             }
         }
 
+        // 同步执行 UI方法
+        public static void SafeInvokeSync(Control? control, Action action)
+        {
+            if (control == null || control.IsDisposed || action == null)
+                return;
+            if (control.IsHandleCreated && control.InvokeRequired)
+            {
+                try { control.Invoke(action); }
+                catch (Exception ex) { Debug.WriteLine($"[SafeInvokeSync] {ex.Message}"); }
+            }
+            else
+            {
+                try { action(); }
+                catch (Exception ex) { Debug.WriteLine($"[SafeInvokeSync] {ex.Message}"); }
+            }
+        }
+
         public static void SafeInvoke(Form form, Action action)
         {
             SafeInvoke((Control)form, action);

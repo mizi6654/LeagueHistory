@@ -123,7 +123,20 @@ namespace League.Managers
             // 注册到缓存
             _form._playerCardManager?.RegisterCard(player.SummonerId, card);   // 注意：这里需要 FormMain 里有 _playerCardManager
 
-            FormUiStateManager.SafeInvoke(_form.tableLayoutPanel1, () =>
+            // 此为异步更新UI方法
+            //FormUiStateManager.SafeInvoke(_form.tableLayoutPanel1, () =>
+            //{
+            //    var oldControl = _form.tableLayoutPanel1.GetControlFromPosition(column, row);
+            //    if (oldControl != null)
+            //    {
+            //        _form.tableLayoutPanel1.Controls.Remove(oldControl);
+            //        oldControl.Dispose();
+            //    }
+            //    _form.tableLayoutPanel1.Controls.Add(panel, column, row);
+            //});
+
+            // 此为同步更新UI方法
+            FormUiStateManager.SafeInvokeSync(_form.tableLayoutPanel1, () =>
             {
                 var oldControl = _form.tableLayoutPanel1.GetControlFromPosition(column, row);
                 if (oldControl != null)
@@ -139,7 +152,11 @@ namespace League.Managers
         {
             if (card == null || card.IsDisposed || matchInfo?.Player == null) return;
 
-            FormUiStateManager.SafeInvoke(card, () =>
+            // 此为异步
+            //FormUiStateManager.SafeInvoke(card, () =>
+
+            // 此为同步
+            FormUiStateManager.SafeInvokeSync(card, () =>
             {
                 var p = matchInfo.Player;
                 card.lblPlayerName.Text = p.GameName ?? "未知玩家";
@@ -181,17 +198,7 @@ namespace League.Managers
                 // 更安全的 Invoke 方式
                 try
                 {
-                    if (card.InvokeRequired)
-                    {
-                        card.Invoke((MethodInvoker)(() =>
-                        {
-                            ApplyNameColor(card, color);
-                        }));
-                    }
-                    else
-                    {
-                        ApplyNameColor(card, color);
-                    }
+                    FormUiStateManager.SafeInvokeSync(card, () => ApplyNameColor(card, color));
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is ObjectDisposedException)
                 {
