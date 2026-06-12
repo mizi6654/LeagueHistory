@@ -44,22 +44,22 @@ namespace League.Models
         /// <summary>
         /// 发送战绩时是否隐藏自己
         /// </summary>
-        public bool HideSelfWhenSending { get; set; } = true;   // 默认隐藏自己
+        public bool HideSelfWhenSending { get; set; } = false;   // 默认隐藏自己
 
         /// <summary>
         /// 发送战绩时是否使用英雄名称代替玩家名称
         /// </summary>
-        public bool UseChampionNameWhenSending { get; set; } = true;  // 默认使用英雄名
+        public bool UseChampionNameWhenSending { get; set; } = false;  // 默认使用英雄名
 
 
         /// <summary>
         /// 自动跳过点赞界面
         /// </summary>
-        public bool EnableSkipHonor { get; set; } = true;
+        public bool EnableSkipHonor { get; set; } = false;
 
         /// <summary>
         /// 自动跳过结算统计界面
         /// </summary>
-        public bool EnableSkipEndOfGameStats { get; set; } = true;
+        public bool EnableSkipEndOfGameStats { get; set; } = false;
     }
 }
