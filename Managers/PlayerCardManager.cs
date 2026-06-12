@@ -1,9 +1,10 @@
-﻿using League.Models;
+﻿using League.Controls;
+using League.Models;
 using League.Networking;
 using League.Parsers;
-using League.Controls;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
+using System.Dynamic;
 
 namespace League.Managers
 {
@@ -94,8 +95,9 @@ namespace League.Managers
                         // 🔥 从原始 team JSON 中取出 id
                         long sid = playerData["summonerId"]?.Value<long>() ?? 0;
                         int cid = playerData["championId"]?.Value<int>() ?? 0;
+                        string puuidFromData = playerData["puuid"]?.ToString() ?? "";
 
-                        var fallback = _factory.CreateFailedPlayerInfo(sid, cid);
+                        var fallback = _factory.CreateFailedPlayerInfo(sid, cid, puuidFromData);
                         _uiManager.CreateLoadingPlayerMatch(fallback, isMyTeam, row, col, "");
                         Debug.WriteLine($"[Fill] 强制失败兜底: sid={sid}, cid={cid}");
                         continue;
@@ -147,6 +149,8 @@ namespace League.Managers
 
                 foreach (var cardInfo in cardsNeedFix)
                 {
+                    Debug.WriteLine($"[补全尝试] Col={cardInfo.Column} Name={cardInfo.CurrentName} SID={cardInfo.SummonerId} PUUID={cardInfo.Puuid ?? "空"}");
+
                     // 隐藏玩家直接修复
                     if (cardInfo.SummonerId == 0 ||
                         string.IsNullOrEmpty(cardInfo.Puuid) ||

@@ -63,7 +63,7 @@ namespace League.Managers
             };
         }
 
-        public PlayerMatchInfo CreateFailedPlayerInfo(long summonerId, int championId)
+        public PlayerMatchInfo CreateFailedPlayerInfo(long summonerId, int championId, string puuid = "")
         {
             string championName = Globals.resLoading.GetChampionById(championId)?.Name ?? "Unknown";
             Image championIcon = Task.Run(() => Globals.resLoading.GetChampionIconAsync(championId)).Result
@@ -78,6 +78,7 @@ namespace League.Managers
                 {
                     SummonerId = summonerId,
                     ChampionId = championId,
+                    Puuid = puuid,
                     ChampionName = "查询失败",
                     GameName = "失败",
                     IsPublic = "[失败]",
