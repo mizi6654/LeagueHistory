@@ -449,7 +449,6 @@ namespace League.UIState
                     break;
                 case 2:
                     tab1Poller.Stop();
-                    Debug.WriteLine("自动化设置");
                     break;
             }
         }
