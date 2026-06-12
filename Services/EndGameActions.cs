@@ -2,6 +2,7 @@
 using Newtonsoft.Json;
 using System.Diagnostics;
 using System.Text;
+using static League.FormMain;
 
 namespace League.Services
 {
@@ -66,6 +67,32 @@ namespace League.Services
             catch (Exception ex)
             {
                 Debug.WriteLine($"[DismissEndOfGameStats] 失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 游戏结束 → 直接回到对应模式大厅
+        /// </summary>
+        public async Task ReturnToSpecificLobbyAsync()
+        {
+            try
+            {
+                await Task.Delay(500);
+
+                if (!string.IsNullOrEmpty(Globals.CurrGameMod) && int.TryParse(Globals.CurrGameMod, out int queueId) && queueId > 0)
+                {
+                    await PostAsync("/lol-lobby/v2/lobby", new { queueId });
+                    Debug.WriteLine($"[EndGameActions] ✅ 返回指定模式大厅 queueId = {queueId}");
+                }
+                else
+                {
+                    await PostAsync("/lol-gameflow/v1/session/request-lobby");
+                    Debug.WriteLine("[EndGameActions] ⚠️ CurrGameMod为空，使用通用返回大厅");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ReturnToSpecificLobby] 异常: {ex.Message}");
             }
         }
     }

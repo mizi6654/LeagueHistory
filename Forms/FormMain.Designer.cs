@@ -44,6 +44,8 @@ namespace League
             tabPage3 = new TabPage();
             tabControl1 = new TabControl();
             tabPage4 = new TabPage();
+            chkSkipEndOfGameStats = new CheckBox();
+            chkSkipHonor = new CheckBox();
             lk_QQGroup = new LinkLabel();
             label5 = new Label();
             lk_GitPro = new LinkLabel();
@@ -64,8 +66,6 @@ namespace League
             txtCustomContent = new TextBox();
             rbModeCustom = new RadioButton();
             rbModeMatch = new RadioButton();
-            chkSkipHonor = new CheckBox();
-            chkSkipEndOfGameStats = new CheckBox();
             panel1.SuspendLayout();
             imageTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
@@ -234,6 +234,26 @@ namespace League
             tabPage4.TabIndex = 0;
             tabPage4.Text = "功能辅助";
             tabPage4.UseVisualStyleBackColor = true;
+            // 
+            // chkSkipEndOfGameStats
+            // 
+            chkSkipEndOfGameStats.AutoSize = true;
+            chkSkipEndOfGameStats.Location = new Point(232, 100);
+            chkSkipEndOfGameStats.Name = "chkSkipEndOfGameStats";
+            chkSkipEndOfGameStats.Size = new Size(147, 21);
+            chkSkipEndOfGameStats.TabIndex = 13;
+            chkSkipEndOfGameStats.Text = "自动跳过结算统计界面";
+            chkSkipEndOfGameStats.UseVisualStyleBackColor = true;
+            // 
+            // chkSkipHonor
+            // 
+            chkSkipHonor.AutoSize = true;
+            chkSkipHonor.Location = new Point(16, 100);
+            chkSkipHonor.Name = "chkSkipHonor";
+            chkSkipHonor.Size = new Size(123, 21);
+            chkSkipHonor.TabIndex = 12;
+            chkSkipHonor.Text = "自动跳过点赞界面";
+            chkSkipHonor.UseVisualStyleBackColor = true;
             // 
             // lk_QQGroup
             // 
@@ -445,26 +465,6 @@ namespace League
             rbModeMatch.Text = "发送战绩信息";
             rbModeMatch.UseVisualStyleBackColor = true;
             // 
-            // chkSkipHonor
-            // 
-            chkSkipHonor.AutoSize = true;
-            chkSkipHonor.Location = new Point(16, 100);
-            chkSkipHonor.Name = "chkSkipHonor";
-            chkSkipHonor.Size = new Size(123, 21);
-            chkSkipHonor.TabIndex = 12;
-            chkSkipHonor.Text = "自动跳过点赞界面";
-            chkSkipHonor.UseVisualStyleBackColor = true;
-            // 
-            // chkSkipEndOfGameStats
-            // 
-            chkSkipEndOfGameStats.AutoSize = true;
-            chkSkipEndOfGameStats.Location = new Point(232, 100);
-            chkSkipEndOfGameStats.Name = "chkSkipEndOfGameStats";
-            chkSkipEndOfGameStats.Size = new Size(147, 21);
-            chkSkipEndOfGameStats.TabIndex = 13;
-            chkSkipEndOfGameStats.Text = "自动跳过结算统计界面";
-            chkSkipEndOfGameStats.UseVisualStyleBackColor = true;
-            // 
             // FormMain
             // 
             AutoScaleDimensions = new SizeF(7F, 17F);
@@ -474,7 +474,7 @@ namespace League
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "联盟视界 League v1.0.8";
+            Text = "联盟视界 League v1.0.9";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
             imageTabControl1.ResumeLayout(false);

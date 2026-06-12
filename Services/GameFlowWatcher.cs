@@ -1,7 +1,9 @@
 ﻿using League.Managers;
 using League.Parsers;
 using League.UIState;
+using Newtonsoft.Json;
 using System.Diagnostics;
+using static League.FormMain;
 
 namespace League.Services
 {
@@ -119,10 +121,18 @@ namespace League.Services
                     case "EndOfGame":
                     case "PreEndOfGame":
                     case "WaitingForStats":
+                        Debug.WriteLine($"[GameEnd Trigger] 检测到结束阶段: {phase}, previous={previousPhase}");
+                        await HandleGameEnd(previousPhase);  // 即使 previousPhase 为空也尝试处理
+                        break;
                     case "Lobby":
                     case "None":
-                        Debug.WriteLine($"[GameEnd Trigger] 检测到结束阶段: {phase}, previous={previousPhase}");
-                        await HandleGameEnd(previousPhase ?? phase);  // 即使 previousPhase 为空也尝试处理
+                        if (_cleanupService.ShouldReturnToLobby())
+                        {
+                            Debug.WriteLine(
+                                $"[Lobby] 检测到刚结束游戏，开始返回模式 {Globals.CurrGameMod}");
+
+                            await _cleanupService.ReturnToSpecificLobbyAsync();
+                        }
                         break;
                 }
             }
@@ -178,11 +188,20 @@ namespace League.Services
             bool shouldHandle = previousPhase == "InProgress"
                              || previousPhase == "WaitingForStats"
                              || previousPhase == "ChampSelect"
-                             || previousPhase == "EndOfGame"           // 新增：当前阶段就是 EndOfGame
+                             || previousPhase == "EndOfGame"
                              || previousPhase == "PreEndOfGame";
 
             if (shouldHandle)
             {
+                // 给游戏结束打一个标记
+                if (!string.IsNullOrEmpty(Globals.CurrGameMod))
+                {
+                    _cleanupService.MarkGameJustEnded();
+
+                    Debug.WriteLine(
+                        $"[HandleGameEnd] 已标记游戏结束，等待Lobby后返回模式 {Globals.CurrGameMod}");
+                }
+
                 await _cleanupService.HandleGameEndAsync(previousPhase);
                 _autoAccepter.Reset();
                 _autoPickService.Reset();

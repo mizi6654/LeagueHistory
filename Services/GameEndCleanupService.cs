@@ -15,9 +15,14 @@ namespace League.Services
         private readonly FormMain _form;
         private readonly PlayerCardManager _cardManager;
         private readonly FormUiStateManager _uiManager;
-        private readonly EndGameActions? _endGameActions;
+        public readonly EndGameActions? _endGameActions;
 
         private bool _gameEndHandled = false;
+
+        private bool _gameJustEnded = false;
+
+        public void MarkGameJustEnded() => _gameJustEnded = true;
+        public bool ShouldReturnToLobby() => _gameJustEnded;
 
         public GameEndCleanupService(FormMain form, PlayerCardManager cardManager, FormUiStateManager uiManager)
         {
@@ -68,12 +73,14 @@ namespace League.Services
 
             try
             {
+                // 跳过点赞界面
                 if (config.EnableSkipHonor && _endGameActions != null)
                 {
                     await Task.Delay(300);        // 进一步提前
                     await _endGameActions.SkipHonorAsync();
                 }
 
+                // 跳过结算界面
                 if (config.EnableSkipEndOfGameStats && _endGameActions != null)
                 {
                     await Task.Delay(300);        // 结算界面通常比点赞晚一点
@@ -83,6 +90,22 @@ namespace League.Services
             catch (Exception ex)
             {
                 Debug.WriteLine($"[ExecuteSkipActionsAsync] 异常: {ex.Message}");
+            }
+        }
+
+        public async Task ReturnToSpecificLobbyAsync()
+        {
+            if (_endGameActions == null) return;
+            try
+            {
+                await Task.Delay(600);
+                await _endGameActions.ReturnToSpecificLobbyAsync();
+                _gameJustEnded = false;   // 执行完重置
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ReturnToSpecificLobbyAsync] 异常: {ex.Message}");
+                _gameJustEnded = false;
             }
         }
 
@@ -116,8 +139,13 @@ namespace League.Services
         public void Cleanup()
         {
             _gameEndHandled = false;
+            _gameJustEnded = false;
         }
 
-        public void Reset() => _gameEndHandled = false;
+        //public void Reset() => _gameEndHandled = false;
+        public void Reset()
+        {
+            _gameEndHandled = false;
+        }
     }
 }
