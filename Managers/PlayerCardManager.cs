@@ -136,6 +136,7 @@ namespace League.Managers
         /// 验证并补全所有卡片（优化版）
         /// - 自动检测缺陷并重试获取队伍数据
         /// - 补全过程中保存详细日志到 Debug_teams 目录（文件名使用 yyyyMMdd_HHmmssfff）
+        /// - 只有需要补全时才创建日志文件
         /// </summary>
         public async Task ValidateAndCompleteAllCards(JArray? teamOne = null, JArray? teamTwo = null)
         {
@@ -164,13 +165,6 @@ namespace League.Managers
                 return;
             }
 
-            // ==================== 日志文件准备 ====================
-            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-            string logFileName = $"{timestamp}.txt";
-            string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
-            Directory.CreateDirectory(DebugPath);
-            string logFullPath = Path.Combine(DebugPath, logFileName);
-
             // ==================== 卡片补全逻辑 ====================
             await _uiManager._uiLock.WaitAsync();
             try
@@ -180,9 +174,15 @@ namespace League.Managers
                 if (cardsNeedFix.Count == 0)
                 {
                     Debug.WriteLine("[Validate] 无需补全，所有卡片正常");
-                    File.AppendAllText(logFullPath, $"[Validate] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - 无需补全，所有卡片正常\n");
                     return;
                 }
+
+                // ==================== 日志文件准备（仅当需要补全时） ====================
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
+                string logFileName = $"{timestamp}.txt";
+                string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
+                Directory.CreateDirectory(DebugPath);
+                string logFullPath = Path.Combine(DebugPath, logFileName);
 
                 // 写入日志头部信息
                 File.AppendAllText(logFullPath, $"[Validate] 开始补全 - 时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
@@ -246,6 +246,12 @@ namespace League.Managers
             catch (Exception ex)
             {
                 Debug.WriteLine($"[ValidateAndCompleteAllCards] 整体异常: {ex.Message}");
+                // 异常时也记录日志（但仅在补全过程中发生异常时才创建）
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
+                string logFileName = $"{timestamp}.txt";
+                string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
+                Directory.CreateDirectory(DebugPath);
+                string logFullPath = Path.Combine(DebugPath, logFileName);
                 File.AppendAllText(logFullPath, $"\n[整体异常] {ex.Message}\n{ex.StackTrace}\n");
             }
             finally
@@ -253,7 +259,6 @@ namespace League.Managers
                 _uiManager._uiLock.Release();
             }
         }
-
 
         /// <summary>
         /// 统一重新获取双方最新队伍数据
