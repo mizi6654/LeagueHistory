@@ -132,86 +132,93 @@ namespace League.Managers
             }
         }
 
-
-        public async Task ValidateAndCompleteAllCards(JArray teamOne = null, JArray teamTwo = null)
+        /// <summary>
+        /// 验证并补全所有卡片（优化版）
+        /// - 自动检测缺陷并重试获取队伍数据
+        /// - 补全过程中保存详细日志到 Debug_teams 目录（文件名使用 yyyyMMdd_HHmmssfff）
+        /// </summary>
+        public async Task ValidateAndCompleteAllCards(JArray? teamOne = null, JArray? teamTwo = null)
         {
+            const int MaxRetry = 2;
+            int retryCount = 0;
+
+            // ==================== 队伍数据检查与重试刷新 ====================
+            while ((teamOne == null || teamTwo == null || teamOne.Count != 5 || teamTwo.Count != 5) && retryCount <= MaxRetry)
+            {
+                if (retryCount > 0)
+                    Debug.WriteLine($"[Validate] 第 {retryCount} 次重试获取队伍数据...");
+
+                Debug.WriteLine("[Validate] 队伍数据不完整，尝试重新获取最新数据...");
+                (teamOne, teamTwo) = await TryGetLatestFullTeamsAsync();
+
+                if (teamOne != null && teamTwo != null && teamOne.Count == 5 && teamTwo.Count == 5)
+                    break;
+
+                retryCount++;
+                await Task.Delay(600); // 重试间隔
+            }
+
+            if (teamOne == null || teamTwo == null || teamOne.Count != 5 || teamTwo.Count != 5)
+            {
+                Debug.WriteLine("[Validate] 多次重试后仍无法得到有效队伍数据，补全中止");
+                return;
+            }
+
+            // ==================== 日志文件准备 ====================
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
+            string logFileName = $"{timestamp}.txt";
+            string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
+            Directory.CreateDirectory(DebugPath);
+            string logFullPath = Path.Combine(DebugPath, logFileName);
+
+            // ==================== 卡片补全逻辑 ====================
             await _uiManager._uiLock.WaitAsync();
             try
             {
-                
                 var cardsNeedFix = _validator.ForceGetAllCardsForCompletion();
-                
+
                 if (cardsNeedFix.Count == 0)
                 {
-                    Debug.WriteLine("[Validate] 无需补全 或 表格尚未初始化");
+                    Debug.WriteLine("[Validate] 无需补全，所有卡片正常");
+                    File.AppendAllText(logFullPath, $"[Validate] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - 无需补全，所有卡片正常\n");
                     return;
                 }
 
-                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-                string teamBug = $"teamBug_{timestamp}.txt";
-                string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
-                Directory.CreateDirectory(DebugPath);
+                // 写入日志头部信息
+                File.AppendAllText(logFullPath, $"[Validate] 开始补全 - 时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
+                File.AppendAllText(logFullPath, $"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片\n\n");
 
-                //Debug.WriteLine($"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片");
-                File.AppendAllText(Path.Combine(DebugPath, $"{teamBug}"), $"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片{Environment.NewLine}");
-
-                // 尝试获取最新完整队伍数据（强烈推荐）
-                var (latestTeamOne, latestTeamTwo) = await TryGetLatestFullTeamsAsync();
+                Debug.WriteLine($"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片");
 
                 foreach (var cardInfo in cardsNeedFix)
                 {
-                    if (cardInfo.RetryCount >= 3)
-                    {
-                        //Debug.WriteLine($"[补全跳过] {cardInfo.CurrentName} 已重试超过3次");
-                        File.AppendAllText(Path.Combine(DebugPath, $"{teamBug}"), $"[补全跳过] {cardInfo.CurrentName} 已重试超过3次{Environment.NewLine}");
-                        continue;
-                    }
+                    string logMsg = $"[补全尝试] Col={cardInfo.Column} Name={cardInfo.CurrentName} SID={cardInfo.SummonerId} PUUID={cardInfo.Puuid ?? "空"}";
+                    Debug.WriteLine(logMsg);
+                    File.AppendAllText(logFullPath, logMsg + "\n");
 
                     // 隐藏玩家直接修复
-                    if (cardInfo.SummonerId == 0 || string.IsNullOrEmpty(cardInfo.Puuid) ||
+                    if (cardInfo.SummonerId == 0 ||
+                        string.IsNullOrEmpty(cardInfo.Puuid) ||
                         cardInfo.CurrentName?.Contains("隐藏") == true)
                     {
                         _validator.FixHiddenPlayerCard(cardInfo.Card);
+                        File.AppendAllText(logFullPath, "  → 隐藏玩家修复\n");
                         continue;
                     }
 
-                    JToken? playerData = null;
-
-                    // 1. 优先用最新完整数据查找
-                    if (latestTeamOne != null || latestTeamTwo != null)
-                    {
-                        playerData = FindPlayerDataByPuuid(latestTeamOne, latestTeamTwo, cardInfo.Puuid)
-                                  ?? FindPlayerDataInSession(latestTeamOne, latestTeamTwo, cardInfo.SummonerId);
-                    }
-
-                    // 2. 兜底使用传入的 team 数据
-                    if (playerData == null && (teamOne != null || teamTwo != null))
-                    {
-                        playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid)
-                                  ?? FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
-                    }
-
-                    // 3. 最终兜底：直接用卡片信息构造（最关键）
-                    if (playerData == null)
-                    {
-                        //Debug.WriteLine($"[补全兜底] 使用卡片信息构造查询 - PUUID={cardInfo.Puuid} SID={cardInfo.SummonerId}");
-                        File.AppendAllText(Path.Combine(DebugPath, $"{teamBug}"), $"[补全兜底] 使用卡片信息构造查询 - PUUID={cardInfo.Puuid} SID={cardInfo.SummonerId}{Environment.NewLine}");
-                        playerData = new JObject
-                        {
-                            ["puuid"] = cardInfo.Puuid,
-                            ["summonerId"] = cardInfo.SummonerId,
-                            ["championId"] = cardInfo.ChampionId
-                        };
-                    }
+                    // 使用当前队伍数据查找
+                    JToken? playerData = FindPlayerDataByPuuid(teamOne, teamTwo, cardInfo.Puuid)
+                                      ?? FindPlayerDataInSession(teamOne, teamTwo, cardInfo.SummonerId);
 
                     if (playerData == null)
                     {
-                        //Debug.WriteLine($"[补全失败] 无法获取玩家数据 PUUID={cardInfo.Puuid}");
-                        File.AppendAllText(Path.Combine(DebugPath, $"{teamBug}"), $"[补全失败] 无法获取玩家数据 PUUID={cardInfo.Puuid}{Environment.NewLine}");
+                        string failLog = $"[补全失败] 找不到玩家数据 Puuid={cardInfo.Puuid}";
+                        Debug.WriteLine(failLog);
+                        File.AppendAllText(logFullPath, failLog + "\n");
                         continue;
                     }
 
-                    // 执行补全查询
+                    // 重试查询战绩
                     var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData);
 
                     if (matchInfo?.Player != null && matchInfo.MatchItems?.Count > 0)
@@ -219,22 +226,27 @@ namespace League.Managers
                         _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
                         _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
 
-                        //Debug.WriteLine($"[补全成功] {matchInfo.Player.GameName}");
-                        File.AppendAllText(Path.Combine(DebugPath, $"{teamBug}"), $"[补全成功] {matchInfo.Player.GameName}{Environment.NewLine}");
-                        cardInfo.Card.RetryCount = 0; // 重置（需在PlayerCardControl加RetryCount属性）
+                        string successLog = $"[补全成功] {matchInfo.Player.GameName} 战绩项:{matchInfo.MatchItems.Count}";
+                        Debug.WriteLine(successLog);
+                        File.AppendAllText(logFullPath, successLog + "\n");
                     }
                     else
                     {
-                        var failedInfo = _factory.CreateFailedPlayerInfo(cardInfo.SummonerId, cardInfo.ChampionId, cardInfo.Puuid);
+                        var failedInfo = _factory.CreateFailedPlayerInfo(cardInfo.SummonerId, cardInfo.ChampionId);
                         _uiManager.UpdateCardUI(cardInfo.Card, failedInfo);
-                        cardInfo.Card.RetryCount++; // 增加重试次数
 
-                        //Debug.WriteLine($"[补全失败] {cardInfo.CurrentName} (第{cardInfo.Card.RetryCount}次)");
-                        File.AppendAllText(Path.Combine(DebugPath, $"{teamBug}"), $"[补全失败] {cardInfo.CurrentName} (第{cardInfo.Card.RetryCount}次){Environment.NewLine}");
+                        string failLog = $"[补全失败] {cardInfo.CurrentName}";
+                        Debug.WriteLine(failLog);
+                        File.AppendAllText(logFullPath, failLog + "\n");
                     }
 
-                    await Task.Delay(350); // 防限流
+                    await Task.Delay(250); // 补全间隔，防限流
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ValidateAndCompleteAllCards] 整体异常: {ex.Message}");
+                File.AppendAllText(logFullPath, $"\n[整体异常] {ex.Message}\n{ex.StackTrace}\n");
             }
             finally
             {
@@ -242,33 +254,73 @@ namespace League.Managers
             }
         }
 
+
         /// <summary>
-        /// 获取最新最完整的队伍数据（用于补全阶段）
+        /// 统一重新获取双方最新队伍数据
+        /// 我方优先用 ChampSelect，整体用 GameSession 补全（兼容 Quick Play）
         /// </summary>
-        private async Task<(JArray?, JArray?)> TryGetLatestFullTeamsAsync()
+        public async Task<(JArray? myTeam, JArray? enemyTeam)> TryGetLatestFullTeamsAsync()
         {
+            JArray? myTeam = null;
+            JArray? enemyTeam = null;
+
             try
             {
-                var session = await Globals.lcuClient.GetGameSession();
-                if (session == null) return (null, null);
-
-                var teamOne = session["gameData"]?["teamOne"] as JArray;
-                var teamTwo = session["gameData"]?["teamTwo"] as JArray;
-                var selections = session["gameData"]?["playerChampionSelections"] as JArray;
-
-                if (selections?.Count == 10)
+                // === 我方：优先使用 ChampSelect（和 ShowMyTeamCards 一致）===
+                var champSession = await Globals.lcuClient.GetChampSelectSession();
+                if (champSession != null)
                 {
-                    (teamOne, teamTwo) = EnsureAllPlayersPresent(teamOne, teamTwo, selections);
-                    Debug.WriteLine($"[Validate] 使用最新Session补全队伍 → Team1:{teamOne.Count} | Team2:{teamTwo.Count}");
+                    myTeam = champSession["myTeam"] as JArray;
+                    if (myTeam != null && myTeam.Count > 0)
+                    {
+                        _form._cachedMyTeam = myTeam;
+                        Debug.WriteLine($"[TryGetLatest] 我方从 ChampSelect 获取 ({myTeam.Count}人)");
+                    }
                 }
 
-                return (teamOne, teamTwo);
+                // === 双方/敌方：使用 GameSession（和 ShowEnemyTeamCardsAsync 一致）===
+                var sessionData = await Globals.lcuClient.GetGameSession();
+                if (sessionData != null)
+                {
+                    var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
+                    var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
+                    var selections = sessionData["gameData"]?["playerChampionSelections"] as JArray;
+
+                    if (selections?.Count == 10)
+                    {
+                        (teamOne, teamTwo) = EnsureAllPlayersPresent(teamOne, teamTwo, selections);
+                    }
+
+                    if (teamOne != null && teamTwo != null)
+                    {
+                        var currentSummoner = await Globals.lcuClient.GetCurrentSummoner();
+                        string myPuuid = currentSummoner?["puuid"]?.ToString() ?? "";
+
+                        if (!string.IsNullOrEmpty(myPuuid))
+                        {
+                            bool isInTeamOne = teamOne.Any(t => t["puuid"]?.ToString() == myPuuid);
+                            myTeam = isInTeamOne ? teamOne : teamTwo;
+                            enemyTeam = isInTeamOne ? teamTwo : teamOne;
+                        }
+                        else
+                        {
+                            myTeam ??= teamOne;
+                            enemyTeam ??= teamTwo;
+                        }
+
+                        _form._cachedMyTeam = myTeam;
+                        _form._cachedEnemyTeam = enemyTeam;
+
+                        Debug.WriteLine($"[TryGetLatest] GameSession 补全成功 | 我方:{myTeam?.Count ?? 0} | 敌方:{enemyTeam?.Count ?? 0}");
+                    }
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[Validate] 获取最新队伍数据失败: {ex.Message}");
-                return (null, null);
+                Debug.WriteLine($"[TryGetLatestFullTeamsAsync] 异常: {ex.Message}");
             }
+
+            return (myTeam, enemyTeam);
         }
 
         /// <summary>

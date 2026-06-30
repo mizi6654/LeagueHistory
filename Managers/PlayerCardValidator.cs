@@ -28,57 +28,6 @@ namespace League.Managers
         }
 
         // 同步更新UI，防止卡片显示不加载中
-        //public List<PlayerCardValidationInfo> ForceGetAllCardsForCompletion()
-        //{
-        //    var result = new List<PlayerCardValidationInfo>();
-
-        //    FormUiStateManager.SafeInvokeSync(_form.tableLayoutPanel1, () =>
-        //    {
-        //        for (int row = 0; row < _form.tableLayoutPanel1.RowCount; row++)
-        //        {
-        //            for (int col = 0; col < _form.tableLayoutPanel1.ColumnCount; col++)
-        //            {
-        //                var panel = _form.tableLayoutPanel1.GetControlFromPosition(col, row) as BorderPanel;
-        //                if (panel?.Controls.Count > 0)
-        //                {
-        //                    var card = panel.Controls[0] as PlayerCardControl;
-        //                    if (card == null || card.IsDisposed) continue;
-
-        //                    string name = card.lblPlayerName.Text?.Trim() ?? "";
-        //                    string rank = card.lblSoloRank.Text?.Trim() ?? "";
-        //                    int listCount = card.ListViewControl?.Items.Count ?? 0;
-
-        //                    bool needsFix = listCount == 0 ||
-        //                                    name.Contains("加载中") ||
-        //                                    name.Contains("查询中") ||
-        //                                    name == "未知" ||
-        //                                    string.IsNullOrWhiteSpace(name) ||
-        //                                    rank.Contains("加载中") ||
-        //                                    rank.Contains("失败") ||
-        //                                    rank == "未知" ||
-        //                                    (card.CurrentSummonerId == 0 && !name.Contains("隐藏"));
-
-        //                    if (needsFix)
-        //                    {
-        //                        result.Add(new PlayerCardValidationInfo
-        //                        {
-        //                            SummonerId = card.CurrentSummonerId,
-        //                            ChampionId = card.CurrentChampionId,
-        //                            Puuid = card.CurrentPuuId,
-        //                            Row = row,
-        //                            Column = col,
-        //                            Card = card,
-        //                            CurrentName = name
-        //                        });
-        //                    }
-        //                }
-        //            }
-        //        }
-        //    });
-
-        //    return result;
-        //}
-
         public List<PlayerCardValidationInfo> ForceGetAllCardsForCompletion()
         {
             var result = new List<PlayerCardValidationInfo>();
