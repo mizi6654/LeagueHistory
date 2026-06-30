@@ -1,7 +1,5 @@
-﻿using League.Infrastructure;
-using League.Managers;
+﻿using League.Managers;
 using League.UIState;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using static League.FormMain;
@@ -119,7 +117,7 @@ namespace League.Services
                 var sessionData = await Globals.lcuClient.GetGameSession();
                 if (sessionData == null) return;
 
-                SaveTeamDataForDebug(sessionData);
+                _cardManager.SaveTeamDataForDebug(sessionData);
 
                 int queueId = sessionData["gameData"]?["queue"]?["id"]?.Value<int>() ?? 0;
                 Globals.CurrGameMod = queueId.ToString();
@@ -131,7 +129,7 @@ namespace League.Services
                 // 🔥 核心：补全缺失的玩家（基于 puuid）
                 if (selections != null && selections.Count == 10)
                 {
-                    (teamOne, teamTwo) = EnsureAllPlayersPresent(teamOne, teamTwo, selections);
+                    (teamOne, teamTwo) = _cardManager.EnsureAllPlayersPresent(teamOne, teamTwo, selections);
                     Debug.WriteLine($"[EnsurePlayers] 补全后 → Team1:{teamOne?.Count ?? 0} | Team2:{teamTwo?.Count ?? 0}");
                 }
 
@@ -152,68 +150,6 @@ namespace League.Services
             catch (Exception ex)
             {
                 Debug.WriteLine($"[ShowEnemyTeamCards] 异常: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 确保 teamOne 和 teamTwo 包含所有10个 puuid（使用 playerChampionSelections 补全）
-        /// </summary>
-        private (JArray teamOne, JArray teamTwo) EnsureAllPlayersPresent(
-            JArray? teamOne, JArray? teamTwo, JArray selections)
-        {
-            var finalTeamOne = teamOne?.DeepClone() as JArray ?? new JArray();
-            var finalTeamTwo = teamTwo?.DeepClone() as JArray ?? new JArray();
-
-            // 收集当前已有的 puuid
-            var existingPuuids = new HashSet<string>();
-            foreach (var p in finalTeamOne) existingPuuids.Add(p["puuid"]?.ToString() ?? "");
-            foreach (var p in finalTeamTwo) existingPuuids.Add(p["puuid"]?.ToString() ?? "");
-
-            // 补充缺失的玩家
-            foreach (var sel in selections)
-            {
-                string? puuid = sel["puuid"]?.ToString();
-                if (string.IsNullOrEmpty(puuid) || existingPuuids.Contains(puuid))
-                    continue;
-
-                // 创建缺失玩家对象
-                var missingPlayer = new JObject
-                {
-                    ["puuid"] = puuid,
-                    ["championId"] = sel["championId"],
-                    ["summonerId"] = 0,
-                    ["summonerName"] = "",
-                    ["profileIconId"] = 0,
-                    ["selectedPosition"] = "NONE"
-                };
-
-                // 优先补到人数少的队伍
-                if (finalTeamOne.Count < 5)
-                    finalTeamOne.Add(missingPlayer);
-                else if (finalTeamTwo.Count < 5)
-                    finalTeamTwo.Add(missingPlayer);
-            }
-
-            return (finalTeamOne, finalTeamTwo);
-        }
-
-        private void SaveTeamDataForDebug(JObject sessionData)
-        {
-            try
-            {
-                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-                string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
-                Directory.CreateDirectory(DebugPath);
-
-                // 正确写法
-                File.WriteAllText(Path.Combine(DebugPath, $"session_{timestamp}.json"),
-                    sessionData.ToString(Formatting.Indented));
-
-                Debug.WriteLine($"[Debug] 已保存 session_{timestamp}.json");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[DebugSave] 保存失败: {ex.Message}");
             }
         }
 

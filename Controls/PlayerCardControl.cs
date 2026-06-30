@@ -7,6 +7,7 @@
         public long CurrentSummonerId { get; set; } = 0;
         public int CurrentChampionId { get; set; } = 0;
         public string CurrentPuuId { get; set; } ="";
+        public int RetryCount { get; set; } = 0;
 
         public PlayerCardControl()
         {
