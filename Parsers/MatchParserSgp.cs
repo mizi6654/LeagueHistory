@@ -422,7 +422,13 @@ namespace League.Parsers
              * ========================= */
             if (gameType == "CUSTOM_GAME")
             {
-                // ⚠️ 关键修复点
+                if (queue == 4310 ||
+                    string.Equals(gameMode, "JADE", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ("怀旧 · 召唤师峡谷", queueId);
+                }
+
+                // 海克斯乱斗
                 if (queue == 3270 ||
                     string.Equals(gameMode, "KIWI", StringComparison.OrdinalIgnoreCase))
                 {
@@ -477,6 +483,7 @@ namespace League.Parsers
 
                 // 自定义海克斯（兜底）
                 case 3270: return ("自定义 · 海克斯乱斗", queueId);
+                case 4310: return ("怀旧 · 召唤师峡谷", queueId);
             }
 
             /* =========================

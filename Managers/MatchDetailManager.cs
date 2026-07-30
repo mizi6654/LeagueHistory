@@ -306,10 +306,10 @@ namespace League.Managers
         {
             if (string.IsNullOrEmpty(queueTag)) return false;
 
-            string[] replayAllowed = new string[15]
+            string[] replayAllowed = new string[16]
             {
                 "q_400", "q_420", "q_430", "q_440", "q_450", "q_480", "q_830", "q_840", "q_850", "q_900", "q_1010",
-                "q_1020", "q_1900", "q_2400","q_3270"
+                "q_1020", "q_1900", "q_2400","q_3270","q_4310"
             };
             return replayAllowed.Contains(queueTag);
         }
@@ -382,10 +382,10 @@ namespace League.Managers
         {
             if (string.IsNullOrEmpty(queueTag)) return false;
 
-            string[] allowed = new string[15]
+            string[] allowed = new string[16]
             {
                 "q_400", "q_420", "q_430", "q_440", "q_450", "q_480", "q_830", "q_840", "q_850", "q_900", "q_1010",
-                "q_1020", "q_1900", "q_2400","q_3270"
+                "q_1020", "q_1900", "q_2400","q_3270","q_4310"
             };
             return allowed.Contains(queueTag);
         }

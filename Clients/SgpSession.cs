@@ -166,6 +166,7 @@ namespace League.Clients
                         {
                             string content = await response.Content.ReadAsStringAsync();
                             JObject json = JObject.Parse(content);
+                            //Debug.WriteLine(json);
                             return json["games"] as JArray;
                         }
                         else
