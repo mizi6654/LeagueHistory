@@ -404,6 +404,11 @@ namespace League.Parsers
             }
         }
 
+        /// <summary>
+        /// 战绩列表中显示模式信息
+        /// </summary>
+        /// <param name="gameJson"></param>
+        /// <returns></returns>
         private (string mode, string queueId) ExtractGameMode(JObject gameJson)
         {
             int queue = gameJson["queueId"]?.Value<int>()
@@ -480,10 +485,11 @@ namespace League.Parsers
 
                 // 官方海克斯
                 case 2400: return ("海克斯乱斗", queueId);
-
+                
                 // 自定义海克斯（兜底）
                 case 3270: return ("自定义 · 海克斯乱斗", queueId);
                 case 4310: return ("怀旧 · 召唤师峡谷", queueId);
+                case 2450: return ("经典海克斯乱斗", queueId);
             }
 
             /* =========================

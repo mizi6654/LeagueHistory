@@ -154,6 +154,11 @@ namespace League.Parsers
             return $"未知(queueId={queueId})";
         }
 
+        /// <summary>
+        /// 此处用于在卡片中显示
+        /// </summary>
+        /// <param name="queueId"></param>
+        /// <returns></returns>
         private string GetModeFromQueueId(int queueId)
         {
             return queueId switch
@@ -178,10 +183,16 @@ namespace League.Parsers
                 1100 => "云顶之弈(排位)",
                 3100 => "自定义 · 召唤师峡谷",     // 你日志中出现的模式
                 4310 => "怀旧 . 召唤师峡谷",
+                2450 => "经典海克斯乱斗",
                 _ => ""
             };
         }
 
+        /// <summary>
+        /// 此处用于在用户列表中显示
+        /// </summary>
+        /// <param name="tags"></param>
+        /// <returns></returns>
         private string MapGameTags(JArray tags)
         {
             if (tags == null || tags.Count == 0) return "未知模式";
@@ -208,6 +219,7 @@ namespace League.Parsers
             if (tagList.Contains("q_1090")) return "云顶之弈(快速)";
             if (tagList.Contains("q_1100")) return "云顶之弈(排位)";
             if (tagList.Contains("q_4310")) return "怀旧 . 召唤师峡谷";
+            if (tagList.Contains("q_2450")) return "经典海克斯乱斗";
 
             // 自定义模式
             if (tagList.Contains("mode_practicetool")) return "训练模式";
