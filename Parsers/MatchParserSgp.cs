@@ -749,9 +749,12 @@ namespace League.Parsers
                 var (image, name, description) = await FormMain.Globals.resLoading.GetRuneInfoAsync(runeId);
                 return new RuneInfo
                 {
+                    id = runeId,          // 或 RuneId = runeId
                     RuneId = runeId,
                     Icon = image,
+                    name = name,          // 补上小写
                     Name = name,
+                    longDesc = description,
                     Description = description
                 };
             });
@@ -814,9 +817,12 @@ namespace League.Parsers
                 var (image, name, description) = await FormMain.Globals.resLoading.GetRuneInfoAsync(runeId);
                 return new RuneInfo
                 {
+                    id = runeId,          // 或 RuneId = runeId
                     RuneId = runeId,
                     Icon = image,
+                    name = name,          // 补上小写
                     Name = name,
+                    longDesc = description,
                     Description = description
                 };
             });
