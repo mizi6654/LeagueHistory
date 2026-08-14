@@ -430,7 +430,7 @@ namespace League.Parsers
                 if (queue == 4310 ||
                     string.Equals(gameMode, "JADE", StringComparison.OrdinalIgnoreCase))
                 {
-                    return ("怀旧 · 召唤师峡谷", queueId);
+                    return ("经典召唤师峡谷", queueId);
                 }
 
                 // 海克斯乱斗
@@ -466,7 +466,7 @@ namespace League.Parsers
 
                 // 官方 AI 快速模式
                 case 480:
-                case 890: return ("快速模式（AI）", queueId);
+                case 890: return ("快速模式", queueId);
 
                 // 旧人机
                 case 830:
@@ -488,8 +488,9 @@ namespace League.Parsers
                 
                 // 自定义海克斯（兜底）
                 case 3270: return ("自定义 · 海克斯乱斗", queueId);
-                case 4310: return ("怀旧 · 召唤师峡谷", queueId);
+                case 4310: return ("经典召唤师峡谷", queueId);
                 case 2450: return ("经典海克斯乱斗", queueId);
+                case 4320: return ("经典模式人机", queueId);
             }
 
             /* =========================

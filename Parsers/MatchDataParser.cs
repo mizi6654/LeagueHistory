@@ -184,6 +184,7 @@ namespace League.Parsers
                 3100 => "自定义 · 召唤师峡谷",     // 你日志中出现的模式
                 4310 => "怀旧 . 召唤师峡谷",
                 2450 => "经典海克斯乱斗",
+                4320 => "经典模式人机",
                 _ => ""
             };
         }
@@ -203,7 +204,7 @@ namespace League.Parsers
             if (tagList.Contains("q_440")) return "灵活组排";
             if (tagList.Contains("q_400") || tagList.Contains("q_430")) return "匹配";
             if (tagList.Contains("q_450")) return "大乱斗";
-            if (tagList.Contains("q_480") || tagList.Contains("q_890")) return "快速模式（AI）";
+            if (tagList.Contains("q_480") || tagList.Contains("q_890")) return "快速模式";
             if (tagList.Contains("q_900")) return "无限火力";
             if (tagList.Contains("q_1020")) return "克隆大作战";
             if (tagList.Contains("q_1300")) return "极限闪击";
@@ -218,8 +219,9 @@ namespace League.Parsers
             if (tagList.Contains("q_700") || tagList.Contains("q_720") || tagList.Contains("q_740") || tagList.Contains("q_750")) return "云顶之弈";
             if (tagList.Contains("q_1090")) return "云顶之弈(快速)";
             if (tagList.Contains("q_1100")) return "云顶之弈(排位)";
-            if (tagList.Contains("q_4310")) return "怀旧 . 召唤师峡谷";
+            if (tagList.Contains("q_4310")) return "经曲召唤师峡谷";
             if (tagList.Contains("q_2450")) return "经典海克斯乱斗";
+            if (tagList.Contains("q_4320")) return "经典模式人机";
 
             // 自定义模式
             if (tagList.Contains("mode_practicetool")) return "训练模式";
@@ -227,7 +229,7 @@ namespace League.Parsers
             if (tagList.Contains("mode_aram")) return "自定义 · 极地大乱斗";
             if (tagList.Contains("mode_cherry") || tagList.Contains("mode_kiwi")) return "自定义 · 海克斯乱斗";
             if (tagList.Contains("type_CUSTOM_GAME")) return "自定义模式";
-            if (tagList.Contains("mdoe_jade")) return "怀旧 . 召唤师峡谷";
+            if (tagList.Contains("mdoe_jade")) return "经典召唤师峡谷";
 
             return $"未知({string.Join(",", tagList)})";
         }

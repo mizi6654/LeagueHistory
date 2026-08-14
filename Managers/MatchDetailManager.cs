@@ -299,19 +299,28 @@ namespace League.Managers
             }
         }
 
+        ///// <summary>
+        ///// 检查是否支持回放
+        ///// </summary>
+        //private bool IsReplaySupported(string queueTag)
+        //{
+        //    if (string.IsNullOrEmpty(queueTag)) return false;
+
+        //    string[] replayAllowed = new string[18]
+        //    {
+        //        "q_400", "q_420", "q_430", "q_440", "q_450", "q_480", "q_830", "q_840", "q_850", "q_900", "q_1010",
+        //        "q_1020", "q_1900", "q_2400","q_3270","q_4310","q_2450","q_4320"
+        //    };
+        //    return replayAllowed.Contains(queueTag);
+        //}
+
         /// <summary>
-        /// 检查是否支持回放
+        /// 检查是否支持回放（默认支持所有模式）
         /// </summary>
         private bool IsReplaySupported(string queueTag)
         {
-            if (string.IsNullOrEmpty(queueTag)) return false;
-
-            string[] replayAllowed = new string[17]
-            {
-                "q_400", "q_420", "q_430", "q_440", "q_450", "q_480", "q_830", "q_840", "q_850", "q_900", "q_1010",
-                "q_1020", "q_1900", "q_2400","q_3270","q_4310","q_2450"
-            };
-            return replayAllowed.Contains(queueTag);
+            // 回放默认全部尝试，让 LCU 自己判断
+            return !string.IsNullOrEmpty(queueTag);
         }
 
         /// <summary>
@@ -375,18 +384,42 @@ namespace League.Managers
             }
         }
 
+        ///// <summary>
+        ///// 检查是否是召唤师峡谷或大乱斗模式
+        ///// </summary>
+        //public bool IsSummonersRiftOrAram(string queueTag)
+        //{
+        //    if (string.IsNullOrEmpty(queueTag)) return false;
+
+        //    string[] allowed = new string[18]
+        //    {
+        //        "q_400", "q_420", "q_430", "q_440", "q_450", "q_480", "q_830", "q_840", "q_850", "q_900", "q_1010",
+        //        "q_1020", "q_1900", "q_2400","q_3270","q_4310","q_2450","q_4320"
+        //    };
+        //    return allowed.Contains(queueTag);
+        //}
+
         /// <summary>
-        /// 检查是否是召唤师峡谷或大乱斗模式
+        /// 检查是否支持显示详细对局信息（只允许峡谷/大乱斗系）
         /// </summary>
         public bool IsSummonersRiftOrAram(string queueTag)
         {
             if (string.IsNullOrEmpty(queueTag)) return false;
 
-            string[] allowed = new string[17]
+            // 只允许这些已知结构兼容的模式
+            string[] allowed = new[]
             {
-                "q_400", "q_420", "q_430", "q_440", "q_450", "q_480", "q_830", "q_840", "q_850", "q_900", "q_1010",
-                "q_1020", "q_1900", "q_2400","q_3270","q_4310","q_2450"
+                "q_400", "q_420", "q_430", "q_440",           // 匹配 / 排位
+                "q_450",                                      // 大乱斗
+                "q_480", "q_890", "q_1900",                   // 快速模式
+                "q_830", "q_840", "q_850", "q_870",           // 人机
+                "q_900",                                      // 无限火力
+                "q_1020",                                     // 克隆大作战
+                "q_2400", "q_2450", "q_3270",                 // 海克斯乱斗
+                "q_4310", "q_4320"                            // 经典模式（匹配 + 人机）
+                // 以后新出的峡谷系模式继续往这里加
             };
+
             return allowed.Contains(queueTag);
         }
         #endregion
