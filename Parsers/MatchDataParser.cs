@@ -167,27 +167,70 @@ namespace League.Parsers
                 440 => "灵活组排",
                 400 or 430 => "匹配",
                 450 => "大乱斗",
-                480 or 890 => "快速模式（AI）",
+
+                // 快速模式（已移除 890）
+                480 or 1900 => "快速模式",
+
                 900 => "无限火力",
                 1020 => "克隆大作战",
                 1300 => "极限闪击",
                 1400 => "终极魔典",
                 1700 => "斗魂竞技场",
-                2400 => "海克斯乱斗",           // ← 海克斯乱斗
+                2400 => "海克斯乱斗",
                 3270 => "自定义 · 海克斯乱斗",
                 950 or 960 => "末日人机",
-                1900 => "快速模式",
                 2000 or 2010 or 2020 => "神木之门",
+
+                // 云顶
                 700 or 720 or 740 or 750 => "云顶之弈",
                 1090 => "云顶之弈(快速)",
                 1100 => "云顶之弈(排位)",
-                3100 => "自定义 · 召唤师峡谷",     // 你日志中出现的模式
-                4310 => "怀旧 . 召唤师峡谷",
+
+                3100 => "自定义 · 召唤师峡谷",
+
+                // 经典模式
+                4310 => "经典召唤师峡谷",
                 2450 => "经典海克斯乱斗",
                 4320 => "经典模式人机",
+
+                // ========== 人机对战 ==========
+                880 => "人机 · 新手",
+                890 => "人机 · 中等",
+                830 => "人机 · 入门",
+                840 or 850 or 870 => "人机对战",
+
                 _ => ""
             };
         }
+        //private string GetModeFromQueueId(int queueId)
+        //{
+        //    return queueId switch
+        //    {
+        //        420 => "单双排",
+        //        440 => "灵活组排",
+        //        400 or 430 => "匹配",
+        //        450 => "大乱斗",
+        //        480 or 890 => "快速模式（AI）",
+        //        900 => "无限火力",
+        //        1020 => "克隆大作战",
+        //        1300 => "极限闪击",
+        //        1400 => "终极魔典",
+        //        1700 => "斗魂竞技场",
+        //        2400 => "海克斯乱斗",           // ← 海克斯乱斗
+        //        3270 => "自定义 · 海克斯乱斗",
+        //        950 or 960 => "末日人机",
+        //        1900 => "快速模式",
+        //        2000 or 2010 or 2020 => "神木之门",
+        //        700 or 720 or 740 or 750 => "云顶之弈",
+        //        1090 => "云顶之弈(快速)",
+        //        1100 => "云顶之弈(排位)",
+        //        3100 => "自定义 · 召唤师峡谷",     // 你日志中出现的模式
+        //        4310 => "怀旧 . 召唤师峡谷",
+        //        2450 => "经典海克斯乱斗",
+        //        4320 => "经典模式人机",
+        //        _ => ""
+        //    };
+        //}
 
         /// <summary>
         /// 此处用于在用户列表中显示
@@ -197,31 +240,42 @@ namespace League.Parsers
         private string MapGameTags(JArray tags)
         {
             if (tags == null || tags.Count == 0) return "未知模式";
-
             var tagList = tags.Select(t => t.ToString()).ToList();
 
             if (tagList.Contains("q_420")) return "单双排";
             if (tagList.Contains("q_440")) return "灵活组排";
             if (tagList.Contains("q_400") || tagList.Contains("q_430")) return "匹配";
             if (tagList.Contains("q_450")) return "大乱斗";
-            if (tagList.Contains("q_480") || tagList.Contains("q_890")) return "快速模式";
+
+            // 快速模式（注意：890 已移出）
+            if (tagList.Contains("q_480") || tagList.Contains("q_1900")) return "快速模式";
+
             if (tagList.Contains("q_900")) return "无限火力";
             if (tagList.Contains("q_1020")) return "克隆大作战";
             if (tagList.Contains("q_1300")) return "极限闪击";
             if (tagList.Contains("q_1400")) return "终极魔典";
             if (tagList.Contains("q_1700")) return "斗魂竞技场";
-            if (tagList.Contains("q_2400")) return "海克斯乱斗";           // 确保有
+            if (tagList.Contains("q_2400")) return "海克斯乱斗";
             if (tagList.Contains("q_3270")) return "自定义 · 海克斯乱斗";
             if (tagList.Contains("q_3100")) return "自定义 · 召唤师峡谷";
             if (tagList.Contains("q_950") || tagList.Contains("q_960")) return "末日人机";
-            if (tagList.Contains("q_1900")) return "快速模式";
             if (tagList.Contains("q_2000") || tagList.Contains("q_2010") || tagList.Contains("q_2020")) return "神木之门";
+
+            // 云顶
             if (tagList.Contains("q_700") || tagList.Contains("q_720") || tagList.Contains("q_740") || tagList.Contains("q_750")) return "云顶之弈";
             if (tagList.Contains("q_1090")) return "云顶之弈(快速)";
             if (tagList.Contains("q_1100")) return "云顶之弈(排位)";
-            if (tagList.Contains("q_4310")) return "经曲召唤师峡谷";
+
+            // 经典模式
+            if (tagList.Contains("q_4310")) return "经典召唤师峡谷";
             if (tagList.Contains("q_2450")) return "经典海克斯乱斗";
             if (tagList.Contains("q_4320")) return "经典模式人机";
+
+            // ========== 人机对战（新增/完善） ==========
+            if (tagList.Contains("q_880")) return "人机 · 新手";
+            if (tagList.Contains("q_890")) return "人机 · 中等";
+            if (tagList.Contains("q_830")) return "人机 · 入门";
+            if (tagList.Contains("q_840") || tagList.Contains("q_850") || tagList.Contains("q_870")) return "人机对战";
 
             // 自定义模式
             if (tagList.Contains("mode_practicetool")) return "训练模式";
@@ -229,10 +283,49 @@ namespace League.Parsers
             if (tagList.Contains("mode_aram")) return "自定义 · 极地大乱斗";
             if (tagList.Contains("mode_cherry") || tagList.Contains("mode_kiwi")) return "自定义 · 海克斯乱斗";
             if (tagList.Contains("type_CUSTOM_GAME")) return "自定义模式";
-            if (tagList.Contains("mdoe_jade")) return "经典召唤师峡谷";
+            if (tagList.Contains("mode_jade") || tagList.Contains("mdoe_jade")) return "经典召唤师峡谷";
 
             return $"未知({string.Join(",", tagList)})";
         }
+        //private string MapGameTags(JArray tags)
+        //{
+        //    if (tags == null || tags.Count == 0) return "未知模式";
+
+        //    var tagList = tags.Select(t => t.ToString()).ToList();
+
+        //    if (tagList.Contains("q_420")) return "单双排";
+        //    if (tagList.Contains("q_440")) return "灵活组排";
+        //    if (tagList.Contains("q_400") || tagList.Contains("q_430")) return "匹配";
+        //    if (tagList.Contains("q_450")) return "大乱斗";
+        //    if (tagList.Contains("q_480") || tagList.Contains("q_890")) return "快速模式";
+        //    if (tagList.Contains("q_900")) return "无限火力";
+        //    if (tagList.Contains("q_1020")) return "克隆大作战";
+        //    if (tagList.Contains("q_1300")) return "极限闪击";
+        //    if (tagList.Contains("q_1400")) return "终极魔典";
+        //    if (tagList.Contains("q_1700")) return "斗魂竞技场";
+        //    if (tagList.Contains("q_2400")) return "海克斯乱斗";           // 确保有
+        //    if (tagList.Contains("q_3270")) return "自定义 · 海克斯乱斗";
+        //    if (tagList.Contains("q_3100")) return "自定义 · 召唤师峡谷";
+        //    if (tagList.Contains("q_950") || tagList.Contains("q_960")) return "末日人机";
+        //    if (tagList.Contains("q_1900")) return "快速模式";
+        //    if (tagList.Contains("q_2000") || tagList.Contains("q_2010") || tagList.Contains("q_2020")) return "神木之门";
+        //    if (tagList.Contains("q_700") || tagList.Contains("q_720") || tagList.Contains("q_740") || tagList.Contains("q_750")) return "云顶之弈";
+        //    if (tagList.Contains("q_1090")) return "云顶之弈(快速)";
+        //    if (tagList.Contains("q_1100")) return "云顶之弈(排位)";
+        //    if (tagList.Contains("q_4310")) return "经曲召唤师峡谷";
+        //    if (tagList.Contains("q_2450")) return "经典海克斯乱斗";
+        //    if (tagList.Contains("q_4320")) return "经典模式人机";
+
+        //    // 自定义模式
+        //    if (tagList.Contains("mode_practicetool")) return "训练模式";
+        //    if (tagList.Contains("mode_classic")) return "自定义 · 召唤师峡谷";
+        //    if (tagList.Contains("mode_aram")) return "自定义 · 极地大乱斗";
+        //    if (tagList.Contains("mode_cherry") || tagList.Contains("mode_kiwi")) return "自定义 · 海克斯乱斗";
+        //    if (tagList.Contains("type_CUSTOM_GAME")) return "自定义模式";
+        //    if (tagList.Contains("mdoe_jade")) return "经典召唤师峡谷";
+
+        //    return $"未知({string.Join(",", tagList)})";
+        //}
 
         private void CacheChampionIcon(string championName, int championId, ImageList heroIcons)
         {
