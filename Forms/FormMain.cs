@@ -28,6 +28,7 @@ namespace League
         private MatchDetailManager? _matchDetailManager;
         // 英雄管理器（用于预加载所有英雄数据）
         private ChampionManager? _championManager;
+        private ClientUtilityService? _clientUtility;   //客户端辅助
 
         // 原有字段
         private AsyncPoller _lcuPoller = new AsyncPoller();
@@ -98,6 +99,8 @@ namespace League
 
             // 新增：业务处理管理器
             _chatSender = new GameChatSender(this, _chatMessageBuilder);
+
+            _clientUtility = new ClientUtilityService();    // 初始化客户端辅助
 
             // 订阅热键
             _hotkeyManager.OnMyTeamHotkey += async () => await _chatSender.HandleMyTeamAsync();
@@ -731,7 +734,7 @@ namespace League
         private void ChkSkipHonor_CheckedChanged(object? sender, EventArgs e)
         {
             if (_appConfig == null) return;
-            _appConfig.EnableSkipHonor = chkSkipHonor.Checked;   
+            _appConfig.EnableSkipHonor = chkSkipHonor.Checked;
             SaveAppConfig();
             Debug.WriteLine($"[游戏结束配置] 跳过点赞界面 已更新: {_appConfig.EnableSkipHonor}");
         }
@@ -739,7 +742,7 @@ namespace League
         private void ChkSkipEndOfGameStats_CheckedChanged(object? sender, EventArgs e)
         {
             if (_appConfig == null) return;
-            _appConfig.EnableSkipEndOfGameStats = chkSkipEndOfGameStats.Checked;  
+            _appConfig.EnableSkipEndOfGameStats = chkSkipEndOfGameStats.Checked;
             SaveAppConfig();
             Debug.WriteLine($"[游戏结束配置] 跳过结算界面 已更新: {_appConfig.EnableSkipEndOfGameStats}");
         }
@@ -825,6 +828,62 @@ namespace League
             {
                 MessageBox.Show("打开QQ群失败：\n" + ex.Message +
                                "\n\n请确认已安装QQ客户端并登录！");
+            }
+        }
+
+        /// <summary>
+        /// 重启客户端界面（不退出登录）
+        /// 适用于：选人卡住、大厅加载不全、按钮点不动等情况
+        /// </summary>
+        private async void btnRestartUx_Click(object sender, EventArgs e)
+        {
+            if (_clientUtility == null)
+            {
+                MessageBox.Show("工具未初始化", "提示");
+                return;
+            }
+
+            btnRestartUx.Enabled = false;
+            try
+            {
+                var (ok, msg) = await _clientUtility.RestartUxAsync();
+                // 游戏内会直接返回说明文字；其它情况可按需弹窗
+                MessageBox.Show(msg, "重启界面", MessageBoxButtons.OK,
+                    ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                btnRestartUx.Enabled = true;
+            }
+        }
+
+
+        /// <summary>
+        /// 强制结束所有相关客户端进程（解决残留进程问题）
+        /// </summary>
+        private void btnCloseClients_Click(object sender, EventArgs e)
+        {
+            if (_clientUtility == null)
+                _clientUtility = new ClientUtilityService();
+
+            if (MessageBox.Show(
+                    "确定强制关闭所有客户端相关进程吗？\n" +
+                    "会结束 LeagueClient / LeagueClientUx 等（不依赖是否已登录 LCU）。",
+                    "确认关闭客户端",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            btnCloseClients.Enabled = false;
+            try
+            {
+                var (anyKilled, msg) = _clientUtility.CloseAllClients();
+                MessageBox.Show(msg, "关闭客户端", MessageBoxButtons.OK,
+                    anyKilled ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                btnCloseClients.Enabled = true;
             }
         }
     }

@@ -44,20 +44,26 @@ namespace League
             tabPage3 = new TabPage();
             tabControl1 = new TabControl();
             tabPage4 = new TabPage();
+            groupBox3 = new GroupBox();
+            checkBoxFilterMode = new CheckBox();
+            chkAutoAccept = new CheckBox();
             chkSkipEndOfGameStats = new CheckBox();
             chkSkipHonor = new CheckBox();
+            groupBox2 = new GroupBox();
+            label7 = new Label();
+            label6 = new Label();
+            btnCloseClients = new Button();
+            btnRestartUx = new Button();
             lk_QQGroup = new LinkLabel();
             label5 = new Label();
             lk_GitPro = new LinkLabel();
             label4 = new Label();
-            chkAutoAccept = new CheckBox();
             groupBox1 = new GroupBox();
             chkNexus = new CheckBox();
             chkAram = new CheckBox();
             chkRanked = new CheckBox();
             chkNormal = new CheckBox();
             lkbPreliminary = new LinkLabel();
-            checkBoxFilterMode = new CheckBox();
             tabPage5 = new TabPage();
             chkUseChampionName = new CheckBox();
             chkHideSelf = new CheckBox();
@@ -74,6 +80,8 @@ namespace League
             tabPage3.SuspendLayout();
             tabControl1.SuspendLayout();
             tabPage4.SuspendLayout();
+            groupBox3.SuspendLayout();
+            groupBox2.SuspendLayout();
             groupBox1.SuspendLayout();
             tabPage5.SuspendLayout();
             SuspendLayout();
@@ -218,15 +226,13 @@ namespace League
             // 
             // tabPage4
             // 
-            tabPage4.Controls.Add(chkSkipEndOfGameStats);
-            tabPage4.Controls.Add(chkSkipHonor);
+            tabPage4.Controls.Add(groupBox3);
+            tabPage4.Controls.Add(groupBox2);
             tabPage4.Controls.Add(lk_QQGroup);
             tabPage4.Controls.Add(label5);
             tabPage4.Controls.Add(lk_GitPro);
             tabPage4.Controls.Add(label4);
-            tabPage4.Controls.Add(chkAutoAccept);
             tabPage4.Controls.Add(groupBox1);
-            tabPage4.Controls.Add(checkBoxFilterMode);
             tabPage4.Location = new Point(4, 26);
             tabPage4.Name = "tabPage4";
             tabPage4.Padding = new Padding(3);
@@ -235,10 +241,44 @@ namespace League
             tabPage4.Text = "功能辅助";
             tabPage4.UseVisualStyleBackColor = true;
             // 
+            // groupBox3
+            // 
+            groupBox3.Controls.Add(checkBoxFilterMode);
+            groupBox3.Controls.Add(chkAutoAccept);
+            groupBox3.Controls.Add(chkSkipEndOfGameStats);
+            groupBox3.Controls.Add(chkSkipHonor);
+            groupBox3.Location = new Point(16, 6);
+            groupBox3.Name = "groupBox3";
+            groupBox3.Size = new Size(905, 126);
+            groupBox3.TabIndex = 15;
+            groupBox3.TabStop = false;
+            groupBox3.Text = "自动化功能";
+            // 
+            // checkBoxFilterMode
+            // 
+            checkBoxFilterMode.AutoSize = true;
+            checkBoxFilterMode.Location = new Point(22, 22);
+            checkBoxFilterMode.Name = "checkBoxFilterMode";
+            checkBoxFilterMode.Size = new Size(363, 21);
+            checkBoxFilterMode.TabIndex = 3;
+            checkBoxFilterMode.Text = "卡片战绩显示是否根据游戏模式查询，不勾选默认查询所有模式";
+            checkBoxFilterMode.UseVisualStyleBackColor = true;
+            checkBoxFilterMode.CheckedChanged += checkBoxFilterMode_CheckedChanged;
+            // 
+            // chkAutoAccept
+            // 
+            chkAutoAccept.AutoSize = true;
+            chkAutoAccept.Location = new Point(22, 58);
+            chkAutoAccept.Name = "chkAutoAccept";
+            chkAutoAccept.Size = new Size(147, 21);
+            chkAutoAccept.TabIndex = 7;
+            chkAutoAccept.Text = "是否启用自动接受对局";
+            chkAutoAccept.UseVisualStyleBackColor = true;
+            // 
             // chkSkipEndOfGameStats
             // 
             chkSkipEndOfGameStats.AutoSize = true;
-            chkSkipEndOfGameStats.Location = new Point(232, 100);
+            chkSkipEndOfGameStats.Location = new Point(238, 99);
             chkSkipEndOfGameStats.Name = "chkSkipEndOfGameStats";
             chkSkipEndOfGameStats.Size = new Size(147, 21);
             chkSkipEndOfGameStats.TabIndex = 13;
@@ -248,17 +288,67 @@ namespace League
             // chkSkipHonor
             // 
             chkSkipHonor.AutoSize = true;
-            chkSkipHonor.Location = new Point(16, 100);
+            chkSkipHonor.Location = new Point(22, 99);
             chkSkipHonor.Name = "chkSkipHonor";
             chkSkipHonor.Size = new Size(123, 21);
             chkSkipHonor.TabIndex = 12;
             chkSkipHonor.Text = "自动跳过点赞界面";
             chkSkipHonor.UseVisualStyleBackColor = true;
             // 
+            // groupBox2
+            // 
+            groupBox2.Controls.Add(label7);
+            groupBox2.Controls.Add(label6);
+            groupBox2.Controls.Add(btnCloseClients);
+            groupBox2.Controls.Add(btnRestartUx);
+            groupBox2.Location = new Point(16, 295);
+            groupBox2.Name = "groupBox2";
+            groupBox2.Size = new Size(905, 116);
+            groupBox2.TabIndex = 14;
+            groupBox2.TabStop = false;
+            groupBox2.Text = "UI辅助";
+            // 
+            // label7
+            // 
+            label7.AutoSize = true;
+            label7.Location = new Point(125, 83);
+            label7.Name = "label7";
+            label7.Size = new Size(380, 17);
+            label7.TabIndex = 7;
+            label7.Text = "适用范围：退出游戏并结束还有进程占用资源，点击结束即可释放资源";
+            // 
+            // label6
+            // 
+            label6.AutoSize = true;
+            label6.Location = new Point(125, 54);
+            label6.Name = "label6";
+            label6.Size = new Size(440, 17);
+            label6.TabIndex = 6;
+            label6.Text = "适用范围：大厅卡顿，选人窗口卡顿，读秒界面卡顿时使用，不需要登录就能重连";
+            // 
+            // btnCloseClients
+            // 
+            btnCloseClients.Location = new Point(9, 80);
+            btnCloseClients.Name = "btnCloseClients";
+            btnCloseClients.Size = new Size(101, 23);
+            btnCloseClients.TabIndex = 3;
+            btnCloseClients.Text = "清理客户端";
+            btnCloseClients.UseVisualStyleBackColor = true;
+            btnCloseClients.Click += btnCloseClients_Click;
+            // 
+            // btnRestartUx
+            // 
+            btnRestartUx.Location = new Point(9, 51);
+            btnRestartUx.Name = "btnRestartUx";
+            btnRestartUx.Size = new Size(101, 23);
+            btnRestartUx.TabIndex = 5;
+            btnRestartUx.Text = "重启客户端";
+            btnRestartUx.Click += btnRestartUx_Click;
+            // 
             // lk_QQGroup
             // 
             lk_QQGroup.AutoSize = true;
-            lk_QQGroup.Location = new Point(74, 301);
+            lk_QQGroup.Location = new Point(73, 492);
             lk_QQGroup.Name = "lk_QQGroup";
             lk_QQGroup.Size = new Size(78, 17);
             lk_QQGroup.TabIndex = 11;
@@ -269,7 +359,7 @@ namespace League
             // label5
             // 
             label5.AutoSize = true;
-            label5.Location = new Point(16, 328);
+            label5.Location = new Point(15, 519);
             label5.Name = "label5";
             label5.Size = new Size(56, 17);
             label5.TabIndex = 10;
@@ -278,7 +368,7 @@ namespace League
             // lk_GitPro
             // 
             lk_GitPro.AutoSize = true;
-            lk_GitPro.Location = new Point(74, 328);
+            lk_GitPro.Location = new Point(73, 519);
             lk_GitPro.Name = "lk_GitPro";
             lk_GitPro.Size = new Size(264, 17);
             lk_GitPro.TabIndex = 9;
@@ -289,21 +379,11 @@ namespace League
             // label4
             // 
             label4.AutoSize = true;
-            label4.Location = new Point(32, 301);
+            label4.Location = new Point(31, 492);
             label4.Name = "label4";
             label4.Size = new Size(40, 17);
             label4.TabIndex = 8;
             label4.Text = "QQ群";
-            // 
-            // chkAutoAccept
-            // 
-            chkAutoAccept.AutoSize = true;
-            chkAutoAccept.Location = new Point(16, 55);
-            chkAutoAccept.Name = "chkAutoAccept";
-            chkAutoAccept.Size = new Size(147, 21);
-            chkAutoAccept.TabIndex = 7;
-            chkAutoAccept.Text = "是否启用自动接受对局";
-            chkAutoAccept.UseVisualStyleBackColor = true;
             // 
             // groupBox1
             // 
@@ -314,7 +394,7 @@ namespace League
             groupBox1.Controls.Add(lkbPreliminary);
             groupBox1.Location = new Point(16, 154);
             groupBox1.Name = "groupBox1";
-            groupBox1.Size = new Size(363, 124);
+            groupBox1.Size = new Size(905, 124);
             groupBox1.TabIndex = 6;
             groupBox1.TabStop = false;
             groupBox1.Text = "英雄预选 - 位置信息根据英雄联盟攻略中心数据划分";
@@ -370,17 +450,6 @@ namespace League
             lkbPreliminary.TabStop = true;
             lkbPreliminary.Text = "点击英雄预选配置，目前支持匹配、排位、大乱斗、海克斯乱斗";
             lkbPreliminary.LinkClicked += lkbPreliminary_LinkClicked;
-            // 
-            // checkBoxFilterMode
-            // 
-            checkBoxFilterMode.AutoSize = true;
-            checkBoxFilterMode.Location = new Point(16, 15);
-            checkBoxFilterMode.Name = "checkBoxFilterMode";
-            checkBoxFilterMode.Size = new Size(363, 21);
-            checkBoxFilterMode.TabIndex = 3;
-            checkBoxFilterMode.Text = "卡片战绩显示是否根据游戏模式查询，不勾选默认查询所有模式";
-            checkBoxFilterMode.UseVisualStyleBackColor = true;
-            checkBoxFilterMode.CheckedChanged += checkBoxFilterMode_CheckedChanged;
             // 
             // tabPage5
             // 
@@ -486,6 +555,10 @@ namespace League
             tabControl1.ResumeLayout(false);
             tabPage4.ResumeLayout(false);
             tabPage4.PerformLayout();
+            groupBox3.ResumeLayout(false);
+            groupBox3.PerformLayout();
+            groupBox2.ResumeLayout(false);
+            groupBox2.PerformLayout();
             groupBox1.ResumeLayout(false);
             groupBox1.PerformLayout();
             tabPage5.ResumeLayout(false);
@@ -529,5 +602,13 @@ namespace League
         private CheckBox chkHideSelf;
         private CheckBox chkSkipEndOfGameStats;
         private CheckBox chkSkipHonor;
+        private GroupBox groupBox2;
+        private Button btnCloseClients;
+        private Button btnRestartUx;
+        private Label label7;
+        private Label label6;
+        private GroupBox groupBox3;
+        private Label label8;
+        private Button btnDodgeNow;
     }
 }
