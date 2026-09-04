@@ -482,6 +482,7 @@ namespace League.Parsers
                 case 4310: return ("经典召唤师峡谷", queueId);
                 case 2450: return ("经典海克斯乱斗", queueId);
                 case 4320: return ("经典模式人机", queueId);
+                case 3140: return ("训练模式", queueId);
             }
 
             /* =========================

@@ -416,7 +416,8 @@ namespace League.Managers
                 "q_900",                                      // 无限火力
                 "q_1020",                                     // 克隆大作战
                 "q_2400", "q_2450", "q_3270",                 // 海克斯乱斗
-                "q_4310", "q_4320"                            // 经典模式
+                "q_4310", "q_4320",                           // 经典模式
+                "q_3140"                                      // 训练模式
             };
 
             return allowed.Contains(queueTag);
