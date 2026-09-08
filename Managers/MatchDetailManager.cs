@@ -299,21 +299,6 @@ namespace League.Managers
             }
         }
 
-        ///// <summary>
-        ///// 检查是否支持回放
-        ///// </summary>
-        //private bool IsReplaySupported(string queueTag)
-        //{
-        //    if (string.IsNullOrEmpty(queueTag)) return false;
-
-        //    string[] replayAllowed = new string[18]
-        //    {
-        //        "q_400", "q_420", "q_430", "q_440", "q_450", "q_480", "q_830", "q_840", "q_850", "q_900", "q_1010",
-        //        "q_1020", "q_1900", "q_2400","q_3270","q_4310","q_2450","q_4320"
-        //    };
-        //    return replayAllowed.Contains(queueTag);
-        //}
-
         /// <summary>
         /// 检查是否支持回放（默认支持所有模式）
         /// </summary>
@@ -383,21 +368,6 @@ namespace League.Managers
                 }
             }
         }
-
-        ///// <summary>
-        ///// 检查是否是召唤师峡谷或大乱斗模式
-        ///// </summary>
-        //public bool IsSummonersRiftOrAram(string queueTag)
-        //{
-        //    if (string.IsNullOrEmpty(queueTag)) return false;
-
-        //    string[] allowed = new string[18]
-        //    {
-        //        "q_400", "q_420", "q_430", "q_440", "q_450", "q_480", "q_830", "q_840", "q_850", "q_900", "q_1010",
-        //        "q_1020", "q_1900", "q_2400","q_3270","q_4310","q_2450","q_4320"
-        //    };
-        //    return allowed.Contains(queueTag);
-        //}
 
         /// <summary>
         /// 检查是否支持显示详细对局信息（只允许峡谷/大乱斗系）

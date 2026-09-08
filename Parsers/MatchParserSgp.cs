@@ -21,41 +21,7 @@ namespace League.Parsers
 
         private static readonly SemaphoreSlim _semaphore = new SemaphoreSlim(MAX_CONCURRENT_PARSING, MAX_CONCURRENT_PARSING);
 
-        private static int _currentParsingCount;
-
-        private static readonly object _lockObject;
-
-        private static readonly ConcurrentDictionary<int, WeakReference<ResourceInfo>> _championCache;
-
-        private static readonly ConcurrentDictionary<int, WeakReference<ResourceInfo>> _spellCache;
-
-        private static readonly ConcurrentDictionary<int, WeakReference<ResourceInfo>> _itemCache;
-
-        private static readonly ConcurrentDictionary<int, WeakReference<ResourceInfo>> _runeCache;
-
-        private static Image _defaultChampionIcon;
-
-        private static Image _defaultSpellIcon;
-
-        private static Image _defaultItemIcon;
-
-        private static Image _defaultRuneIcon;
-
         public event Action<string> PlayerIconClicked;
-
-        static MatchParserSgp()
-        {
-            _currentParsingCount = 0;
-            _lockObject = new object();
-            _championCache = new ConcurrentDictionary<int, WeakReference<ResourceInfo>>();
-            _spellCache = new ConcurrentDictionary<int, WeakReference<ResourceInfo>>();
-            _itemCache = new ConcurrentDictionary<int, WeakReference<ResourceInfo>>();
-            _runeCache = new ConcurrentDictionary<int, WeakReference<ResourceInfo>>();
-            _defaultChampionIcon = CreateDefaultImage(Color.Gray);
-            _defaultSpellIcon = CreateDefaultImage(Color.LightGray);
-            _defaultItemIcon = CreateDefaultImage(Color.DarkGray);
-            _defaultRuneIcon = CreateDefaultImage(Color.Gold);
-        }
 
         private static Image CreateDefaultImage(Color color)
         {
@@ -508,114 +474,7 @@ namespace League.Parsers
 
             return ($"未知模式({queue})", queueId);
         }
-        //private (string mode, string queueId) ExtractGameMode(JObject gameJson)
-        //{
-        //    int queue = gameJson["queueId"]?.Value<int>()
-        //        ?? gameJson["info"]?["queueId"]?.Value<int>()
-        //        ?? 0;
-        //    string queueId = queue > 0 ? $"q_{queue}" : "";
-
-        //    string gameMode = gameJson["gameMode"]?.ToString()
-        //        ?? gameJson["info"]?["gameMode"]?.ToString();
-
-        //    string gameType = gameJson["gameType"]?.ToString()
-        //        ?? gameJson["info"]?["gameType"]?.ToString();
-
-        //    /* =========================
-        //     * 1️⃣ 自定义（最高优先级）
-        //     * ========================= */
-        //    if (gameType == "CUSTOM_GAME")
-        //    {
-        //        if (queue == 4310 ||
-        //            string.Equals(gameMode, "JADE", StringComparison.OrdinalIgnoreCase))
-        //        {
-        //            return ("经典召唤师峡谷", queueId);
-        //        }
-
-        //        // 海克斯乱斗
-        //        if (queue == 3270 ||
-        //            string.Equals(gameMode, "KIWI", StringComparison.OrdinalIgnoreCase))
-        //        {
-        //            return ("自定义 · 海克斯乱斗", queueId);
-        //        }
-
-        //        if (string.Equals(gameMode, "PRACTICETOOL", StringComparison.OrdinalIgnoreCase))
-        //            return ("训练模式", queueId);
-
-        //        return gameMode?.ToLower() switch
-        //        {
-        //            "classic" => ("自定义 · 召唤师峡谷", queueId),
-        //            "aram" => ("自定义 · 极地大乱斗", queueId),
-        //            "cherry" => ("自定义 · 海克斯乱斗", queueId),
-        //            _ => ("自定义模式", queueId)
-        //        };
-        //    }
-
-        //    /* =========================
-        //     * 2️⃣ 官方匹配 / 排位
-        //     * ========================= */
-        //    switch (queue)
-        //    {
-        //        case 420: return ("单双排", queueId);
-        //        case 440: return ("灵活排位", queueId);
-
-        //        // 普通匹配（自选）
-        //        case 400:
-        //        case 430: return ("匹配", queueId);
-
-        //        // 官方 AI 快速模式
-        //        case 480:
-        //        case 890: return ("快速模式", queueId);
-
-        //        // 旧人机
-        //        case 830:
-        //        case 840:
-        //        case 850:
-        //        case 870: return ("人机对战", queueId);
-
-        //        case 450: return ("大乱斗", queueId);
-
-        //        case 900: return ("无限火力", queueId);
-        //        case 1020: return ("克隆大作战", queueId);
-        //        case 1300: return ("极限闪击", queueId);
-        //        case 1400: return ("终极魔典", queueId);
-
-        //        case 1700: return ("斗魂竞技场", queueId);
-
-        //        // 官方海克斯
-        //        case 2400: return ("海克斯乱斗", queueId);
-
-        //        // 自定义海克斯（兜底）
-        //        case 3270: return ("自定义 · 海克斯乱斗", queueId);
-        //        case 4310: return ("经典召唤师峡谷", queueId);
-        //        case 2450: return ("经典海克斯乱斗", queueId);
-        //        case 4320: return ("经典模式人机", queueId);
-        //    }
-
-        //    /* =========================
-        //     * 3️⃣ queue = 0 且非自定义 → 不强行 classic
-        //     * ========================= */
-        //    if (queue == 0)
-        //        return ("未知模式", queueId);
-
-        //    /* =========================
-        //     * 4️⃣ gameMode 最终兜底
-        //     * ========================= */
-        //    if (!string.IsNullOrEmpty(gameMode))
-        //    {
-        //        return gameMode.ToLower() switch
-        //        {
-        //            "classic" => ("召唤师峡谷", queueId),
-        //            "aram" => ("大乱斗", queueId),
-        //            "cherry" => ("斗魂竞技场", queueId),
-        //            _ => ($"未知模式({queue})", queueId)
-        //        };
-        //    }
-
-        //    return ($"未知模式({queue})", queueId);
-        //}
-
-
+        
 
         private (int damageRank, int goldRank, int kpRank) CalculateRanks(JArray participants, JObject selfParticipant, int selfDamage, int selfGold, double selfKP)
         {

@@ -33,13 +33,10 @@ namespace League
         // 原有字段
         private AsyncPoller _lcuPoller = new AsyncPoller();
         private MatchTabContent? _matchTabContent;
-        private CancellationTokenSource? _watcherCts;
-        private CancellationTokenSource? _champSelectCts;
         public int myTeamId = 0;
         public List<string> lastChampSelectSnapshot = new List<string>();
         public string lastChampSelectSnapshotString = "";
         private Poller _tab1Poller = new Poller();
-        private bool _champSelectMessageSent = false;
         public JArray? _cachedMyTeam;
         public JArray? _cachedEnemyTeam;
         private LeagueConfig? _appConfig;
