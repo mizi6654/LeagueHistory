@@ -1,7 +1,6 @@
 ﻿using League.Managers;
 using League.Parsers;
 using League.UIState;
-using Newtonsoft.Json;
 using System.Diagnostics;
 using static League.FormMain;
 
@@ -153,9 +152,14 @@ namespace League.Services
             // 🔥 重置自动接受状态
             _autoAccepter.Reset();
 
+            // 验证是否自动接受对局，以及接受对局延时时间
             if (phase == "ReadyCheck" && _form.GetAppConfig()?.EnableAutoAcceptQueue == true)
             {
-                await _autoAccepter.TryAcceptAsync();
+                int delay = _form.GetAppConfig()?.AutoAcceptDelaySeconds ?? 0;
+                // 只允许 0 / 5 / 10，防止配置被改乱
+                if (delay != 5 && delay != 10) delay = 0;
+
+                await _autoAccepter.TryAcceptAsync(delay);
             }
 
             FormUiStateManager.SafeInvoke(_form.imageTabControl1, () =>

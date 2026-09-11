@@ -21,16 +21,32 @@ namespace League.Parsers
             return RankedStats.FromJson(rankedJson);
         }
 
-        public async Task<JArray> GetPlayerMatchesAsync(string puuid, bool filterByGameMode, string currentQueueId = null)
+        /// <summary>
+        /// 选人窗口卡片战绩查询数量配置
+        /// </summary>
+        /// <param name="puuid"></param>
+        /// <param name="filterByGameMode"></param>
+        /// <param name="count"></param>
+        /// <param name="currentQueueId"></param>
+        /// <returns></returns>
+        public async Task<JArray> GetPlayerMatchesAsync(
+        string puuid,
+        bool filterByGameMode,
+        int count = 20,
+        string currentQueueId = null)
         {
+            // 兜底，防止异常值
+            if (count != 10 && count != 20 && count != 30 && count != 50)
+                count = 20;
+
             string queueId = currentQueueId ?? await GetCurrentQueueIdAsync();
             if (!filterByGameMode)
             {
-                return await Globals.sgpClient.SgpFetchLatestMatches(puuid, 0, 20, "");
+                return await Globals.sgpClient.SgpFetchLatestMatches(puuid, 0, count, "");
             }
 
             string queueFilter = GetQueueFilter(queueId);
-            return await Globals.sgpClient.SgpFetchLatestMatches(puuid, 0, 20, queueFilter);
+            return await Globals.sgpClient.SgpFetchLatestMatches(puuid, 0, count, queueFilter);
         }
 
         private async Task<string> GetCurrentQueueIdAsync()

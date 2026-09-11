@@ -22,6 +22,7 @@ namespace League.Parsers
 
         private PlayerCardManager _playerCardManager;
         private bool _filterByGameMode = false;
+        private int _matchHistoryCount = 20;
 
         public MatchQueryProcessor()
         {
@@ -49,6 +50,12 @@ namespace League.Parsers
         {
             _filterByGameMode = filterByGameMode;
             Debug.WriteLine($"[MatchQueryProcessor] 筛选模式设置为: {filterByGameMode}");
+        }
+
+        public void SetMatchHistoryCount(int count)
+        {
+            _matchHistoryCount = count is 10 or 20 or 30 or 50 ? count : 20;
+            Debug.WriteLine($"[MatchQueryProcessor] 战绩场数设置为: {_matchHistoryCount}");
         }
 
         public async Task<PlayerMatchInfo> SafeFetchPlayerMatchInfoAsync(JToken playerData, int retryTimes = 2)
@@ -155,7 +162,8 @@ namespace League.Parsers
             string soloRank = GetFormattedRank(rankedStats, "单双排");
             string flexRank = GetFormattedRank(rankedStats, "灵活组排");
 
-            var matchesJson = await _fetcher.GetPlayerMatchesAsync(puuid, _filterByGameMode);
+            //var matchesJson = await _fetcher.GetPlayerMatchesAsync(puuid, _filterByGameMode);
+            var matchesJson = await _fetcher.GetPlayerMatchesAsync(puuid, _filterByGameMode, _matchHistoryCount);
             var result = _parser.ParsePlayerMatchInfo(puuid, matchesJson);
 
             result.Player = new PlayerInfo

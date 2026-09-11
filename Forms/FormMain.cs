@@ -136,13 +136,34 @@ namespace League
                 _appConfig = _configUpdateManager!.LoadConfig();
 
                 // 根据配置恢复复选框
-                checkBoxFilterMode.Checked = _appConfig.FilterByGameMode;
-                // 恢复复选框状态（新增）
+                checkBoxFilterMode.Checked = _appConfig.FilterByGameMode;   //是否在卡片中过滤模式
+
+                // 恢复卡片战绩要查询的场数
+                int count = _appConfig.CardMatchHistoryCount;
+                cboCardMatchCount.SelectedIndex = count switch
+                {
+                    10 => 0,    // 第 0 项 = 10
+                    30 => 2,    // 第 2 项 = 30（注释写成「第2项」容易误会）
+                    50 => 3,    
+                    _ => 1      // 实际是 index==1 → 20，不是「第4项」
+                };
+
+                _matchQueryProcessor?.SetFilterMode(_appConfig.FilterByGameMode);
+                _matchQueryProcessor?.SetMatchHistoryCount(_appConfig.CardMatchHistoryCount);
+
                 chkNormal.Checked = _appConfig.EnablePreliminaryInNormal;   //匹配
                 chkRanked.Checked = _appConfig.EnablePreliminaryInRanked;   //排位
                 chkAram.Checked = _appConfig.EnablePreliminaryInAram;       //大乱斗
                 chkNexus.Checked = _appConfig.EnablePreliminaryInNexusBlitz;    //海克斯乱斗
-                chkAutoAccept.Checked = _appConfig.EnableAutoAcceptQueue;   // 在恢复其他复选框的位置添加
+                chkAutoAccept.Checked = _appConfig.EnableAutoAcceptQueue;   // 自动接受对局
+
+                // 恢复自动接受对局延时配置
+                cboAutoAcceptDelay.SelectedIndex = _appConfig.AutoAcceptDelaySeconds switch
+                {
+                    5 => 1,     // 配置是5秒 → 选中第1项
+                    10 => 2,    // 配置是10秒 → 选中第2项
+                    _ => 0      // 0秒 或 其他值 → 默认选中第0项（立即）
+                };
                 chkHideSelf.Checked = _appConfig.HideSelfWhenSending;   //发送战绩时是否隐藏自己
                 chkUseChampionName.Checked = _appConfig.UseChampionNameWhenSending; //发送战绩时是否使用英雄名称
                 chkSkipHonor.Checked = _appConfig.EnableSkipHonor;  //自动跳过点赞界面
@@ -180,10 +201,12 @@ namespace League
                 chkAram.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkNexus.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkAutoAccept.CheckedChanged += AutoAccept_CheckedChanged;
+                cboAutoAcceptDelay.SelectedIndexChanged += cboAutoAcceptDelay_SelectedIndexChanged;
                 chkHideSelf.CheckedChanged += HideSelf_CheckedChanged;
                 chkUseChampionName.CheckedChanged += UseChampionName_CheckedChanged;
                 chkSkipHonor.CheckedChanged += ChkSkipHonor_CheckedChanged;
                 chkSkipEndOfGameStats.CheckedChanged += ChkSkipEndOfGameStats_CheckedChanged;
+                cboCardMatchCount.SelectedIndexChanged += cboCardMatchCount_SelectedIndexChanged;
 
                 // 启动轮询 LCU 检测
                 StartLcuConnectPolling();
@@ -620,12 +643,17 @@ namespace League
         }
         #endregion
 
-        #region 其他事件处理
+        #region 自动化操作事件处理方法
         private void imageTabControl1_SelectedIndexChanged(object sender, EventArgs e)
         {
             _uiManager!.HandleTabSelectionChanged(imageTabControl1.SelectedIndex, _tab1Poller);
         }
 
+        /// <summary>
+        /// 打开英雄预选配置面板
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void lkbPreliminary_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
             if (!_uiManager!.LcuReady)
@@ -644,6 +672,11 @@ namespace League
             Debug.WriteLine("[自动预选] 预选配置已修改，缓存已清除");
         }
 
+        /// <summary>
+        /// 是否勾选卡片模式筛选
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void checkBoxFilterMode_CheckedChanged(object sender, EventArgs e)
         {
             // 更新内存中的配置
@@ -655,9 +688,42 @@ namespace League
             // 通知MatchQueryProcessor更新筛选模式
             _matchQueryProcessor?.SetFilterMode(checkBoxFilterMode.Checked);
 
+            _matchQueryProcessor?.ClearPlayerMatchCache();
+
             Debug.WriteLine($"[配置] 过滤模式改为: {checkBoxFilterMode.Checked}，配置已保存");
         }
 
+        /// <summary>
+        /// 卡片模式查询数量配置
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void cboCardMatchCount_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (_appConfig == null) return;
+
+            _appConfig.CardMatchHistoryCount = cboCardMatchCount.SelectedIndex switch
+            {
+                0 => 10,    // 选中第1项 → 查10
+                2 => 30,    // 选中第2项 → 查30
+                3 => 50,    // 选中第3项 → 查50
+                _ => 20     // 选中第4项 → 查20
+            };
+
+            _matchQueryProcessor?.SetMatchHistoryCount(_appConfig.CardMatchHistoryCount);
+            SaveAppConfig();
+
+            // 场数变了，旧缓存场数不一致，建议清掉选人战绩缓存
+            _matchQueryProcessor?.ClearPlayerMatchCache();
+
+            Debug.WriteLine($"[配置] 卡片战绩场数 = {_appConfig.CardMatchHistoryCount}");
+        }
+
+        /// <summary>
+        /// 是否勾选模式中自动预选英雄
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void ModeCheckBox_CheckedChanged(object sender, EventArgs e)
         {
             if (_appConfig == null) return;
@@ -672,17 +738,51 @@ namespace League
             Debug.WriteLine("[自动预选模式] 配置已更新并保存");
         }
 
+        /// <summary>
+        /// 自动接受对局
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void AutoAccept_CheckedChanged(object sender, EventArgs e)
         {
-            if (_appConfig == null) return;
-            _appConfig.EnableAutoAcceptQueue = chkAutoAccept.Checked;
-
-            SaveAppConfig();
-
-            Debug.WriteLine($"[自动接受对局] 已更新配置: {_appConfig.EnableAutoAcceptQueue}");
+            SaveAutoAcceptConfig();
         }
 
-        // 当用户切换单选按钮时触发
+        /// <summary>
+        /// 自动接受对局延时设置
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void cboAutoAcceptDelay_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            SaveAutoAcceptConfig();
+        }
+
+        /// <summary>
+        /// 保存自动接受对局与对局接受延时时间
+        /// </summary>
+        private void SaveAutoAcceptConfig()
+        {
+            if (_appConfig == null) return;
+
+            _appConfig.EnableAutoAcceptQueue = chkAutoAccept.Checked;
+
+            _appConfig.AutoAcceptDelaySeconds = cboAutoAcceptDelay.SelectedIndex switch
+            {
+                1 => 5,     // 选中第1项 → 存5
+                2 => 10,    // 选中第2项 → 存10
+                _ => 0      // 选中第0项 或 其他 → 存0
+            };
+
+            SaveAppConfig();
+            Debug.WriteLine($"[自动接受] 开关={_appConfig.EnableAutoAcceptQueue}, 延迟={_appConfig.AutoAcceptDelaySeconds}秒");
+        }
+
+        /// <summary>
+        /// 设置发送消息是战绩，还是自定义消息
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void SendMode_CheckedChanged(object sender, EventArgs e)
         {
             if (rbModeCustom == null || txtCustomContent == null || _appConfig == null) return;
@@ -700,7 +800,11 @@ namespace League
             SaveAppConfig();
         }
 
-        // 当多行文本框失去焦点（鼠标点击别处或切换窗口）时触发保存
+        /// <summary>
+        /// 自定义消息配置自动保存
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void TxtCustomContent_Leave(object sender, EventArgs e)
         {
             if (txtCustomContent == null || _appConfig == null) return;
@@ -712,6 +816,11 @@ namespace League
             SaveAppConfig();
         }
 
+        /// <summary>
+        /// 发送战绩时是否隐藏自己
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void HideSelf_CheckedChanged(object sender, EventArgs e)
         {
             if (_appConfig == null) return;
@@ -720,6 +829,11 @@ namespace League
             Debug.WriteLine($"[发送配置] 隐藏自己 已更新: {_appConfig.HideSelfWhenSending}");
         }
 
+        /// <summary>
+        /// 发送战绩时是否使用英雄名称
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void UseChampionName_CheckedChanged(object sender, EventArgs e)
         {
             if (_appConfig == null) return;
@@ -728,6 +842,11 @@ namespace League
             Debug.WriteLine($"[发送配置] 使用英雄名称 已更新: {_appConfig.UseChampionNameWhenSending}");
         }
 
+        /// <summary>
+        /// 游戏结束时是否跳过点赞界面
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void ChkSkipHonor_CheckedChanged(object? sender, EventArgs e)
         {
             if (_appConfig == null) return;
@@ -736,6 +855,11 @@ namespace League
             Debug.WriteLine($"[游戏结束配置] 跳过点赞界面 已更新: {_appConfig.EnableSkipHonor}");
         }
 
+        /// <summary>
+        /// 游戏结束时是否跳过结算界面
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void ChkSkipEndOfGameStats_CheckedChanged(object? sender, EventArgs e)
         {
             if (_appConfig == null) return;
@@ -743,7 +867,26 @@ namespace League
             SaveAppConfig();
             Debug.WriteLine($"[游戏结束配置] 跳过结算界面 已更新: {_appConfig.EnableSkipEndOfGameStats}");
         }
+        
+        #endregion
 
+        #region 静态全局类
+        public static class Globals
+        {
+            public static LcuSession lcuClient = new LcuSession();
+            public static SgpSession sgpClient = new SgpSession();
+            public static ResourceLoading resLoading = new ResourceLoading();
+            public static string? CurrentSummonerId;
+            public static string? CurrentPuuid;
+            public static string? CurrGameMod;
+            public static string? CurrentSummonerName; // 纯 displayName（不带 #）
+
+            // 新增这行：全局保存 WebSocket 客户端
+            //public static LcuWebSocketClient? WsClient;
+        }
+        #endregion
+
+        #region 窗体UI事件方法
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
@@ -763,23 +906,6 @@ namespace League
 
             _playerCardManager?.UiLock?.Dispose();
         }
-        #endregion
-
-        #region 静态全局类
-        public static class Globals
-        {
-            public static LcuSession lcuClient = new LcuSession();
-            public static SgpSession sgpClient = new SgpSession();
-            public static ResourceLoading resLoading = new ResourceLoading();
-            public static string? CurrentSummonerId;
-            public static string? CurrentPuuid;
-            public static string? CurrGameMod;
-            public static string? CurrentSummonerName; // 纯 displayName（不带 #）
-
-            // 新增这行：全局保存 WebSocket 客户端
-            //public static LcuWebSocketClient? WsClient;
-        }
-        #endregion
 
         private void lk_GitPro_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
@@ -883,5 +1009,7 @@ namespace League
                 btnCloseClients.Enabled = true;
             }
         }
+
+        #endregion
     }
 }

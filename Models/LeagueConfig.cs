@@ -14,6 +14,11 @@ namespace League.Models
         /// </summary>
         public bool FilterByGameMode { get; set; } = false; // 默认查询所有
 
+        /// <summary>
+        /// 选人卡片查询的近期战绩场数（仅允许 10/20/30/50）
+        /// </summary>
+        public int CardMatchHistoryCount { get; set; } = 20;
+
         // 新增：预选相关配置
         public PreliminaryConfig Preliminary { get; set; } = new PreliminaryConfig();
 
@@ -40,6 +45,11 @@ namespace League.Models
         /// 是否启用自动接受对局（Ready Check）
         /// </summary>
         public bool EnableAutoAcceptQueue { get; set; } = false;
+
+        /// <summary>
+        /// 自动接受对局的延迟秒数（0=立即，5，10）
+        /// </summary>
+        public int AutoAcceptDelaySeconds { get; set; } = 0;
 
         /// <summary>
         /// 发送战绩时是否隐藏自己
