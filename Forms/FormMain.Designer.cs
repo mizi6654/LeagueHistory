@@ -44,6 +44,7 @@ namespace League
             tabPage3 = new TabPage();
             tabControl1 = new TabControl();
             tabPage4 = new TabPage();
+            label10 = new Label();
             groupBox3 = new GroupBox();
             label9 = new Label();
             cboCardMatchCount = new ComboBox();
@@ -230,6 +231,7 @@ namespace League
             // 
             // tabPage4
             // 
+            tabPage4.Controls.Add(label10);
             tabPage4.Controls.Add(groupBox3);
             tabPage4.Controls.Add(groupBox2);
             tabPage4.Controls.Add(lk_QQGroup);
@@ -244,6 +246,15 @@ namespace League
             tabPage4.TabIndex = 0;
             tabPage4.Text = "功能辅助";
             tabPage4.UseVisualStyleBackColor = true;
+            // 
+            // label10
+            // 
+            label10.AutoSize = true;
+            label10.Location = new Point(16, 552);
+            label10.Name = "label10";
+            label10.Size = new Size(860, 17);
+            label10.TabIndex = 16;
+            label10.Text = "注意：如果登录了游戏，还一直显示连接中，请右键，以管理员方式运行软件，另外，如已经进入了游戏内再打开是无法使用的，必须是游戏开始前，或者结束后";
             // 
             // groupBox3
             // 
@@ -378,7 +389,7 @@ namespace League
             btnCloseClients.Name = "btnCloseClients";
             btnCloseClients.Size = new Size(101, 23);
             btnCloseClients.TabIndex = 3;
-            btnCloseClients.Text = "清理客户端";
+            btnCloseClients.Text = "退出客户端";
             btnCloseClients.UseVisualStyleBackColor = true;
             btnCloseClients.Click += btnCloseClients_Click;
             // 
@@ -589,7 +600,7 @@ namespace League
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "联盟视界 League v1.0.9";
+            Text = "联盟视界 League v1.1.0";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
             imageTabControl1.ResumeLayout(false);
@@ -660,5 +671,6 @@ namespace League
         private Label lblAutoAcceptDelay;
         private Label label9;
         private ComboBox cboCardMatchCount;
+        private Label label10;
     }
 }
