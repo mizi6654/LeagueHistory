@@ -117,8 +117,6 @@ namespace League.Services
                 var sessionData = await Globals.lcuClient.GetGameSession();
                 if (sessionData == null) return;
 
-                _cardManager.SaveTeamDataForDebug(sessionData);
-
                 int queueId = sessionData["gameData"]?["queue"]?["id"]?.Value<int>() ?? 0;
                 Globals.CurrGameMod = queueId.ToString();
 

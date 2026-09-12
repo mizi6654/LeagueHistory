@@ -2,7 +2,6 @@
 using League.Models;
 using League.Networking;
 using League.Parsers;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using static League.FormMain;
@@ -177,24 +176,12 @@ namespace League.Managers
                     return;
                 }
 
-                // ==================== 日志文件准备（仅当需要补全时） ====================
-                //string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-                //string logFileName = $"{timestamp}.txt";
-                //string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
-                //Directory.CreateDirectory(DebugPath);
-                //string logFullPath = Path.Combine(DebugPath, logFileName);
-
-                // 写入日志头部信息
-                //File.AppendAllText(logFullPath, $"[Validate] 开始补全 - 时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
-                //File.AppendAllText(logFullPath, $"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片\n\n");
-
                 Debug.WriteLine($"[Validate] 发现 {cardsNeedFix.Count} 个需要补全的卡片");
 
                 foreach (var cardInfo in cardsNeedFix)
                 {
                     string logMsg = $"[补全尝试] Col={cardInfo.Column} Name={cardInfo.CurrentName} SID={cardInfo.SummonerId} PUUID={cardInfo.Puuid ?? "空"}";
                     Debug.WriteLine(logMsg);
-                    //File.AppendAllText(logFullPath, logMsg + "\n");
 
                     // 隐藏玩家直接修复
                     if (cardInfo.SummonerId == 0 ||
@@ -202,7 +189,6 @@ namespace League.Managers
                         cardInfo.CurrentName?.Contains("隐藏") == true)
                     {
                         _validator.FixHiddenPlayerCard(cardInfo.Card);
-                        //File.AppendAllText(logFullPath, "  → 隐藏玩家修复\n");
                         continue;
                     }
 
@@ -214,7 +200,6 @@ namespace League.Managers
                     {
                         string failLog = $"[补全失败] 找不到玩家数据 Puuid={cardInfo.Puuid}";
                         Debug.WriteLine(failLog);
-                        //File.AppendAllText(logFullPath, failLog + "\n");
                         continue;
                     }
 
@@ -228,7 +213,6 @@ namespace League.Managers
 
                         string successLog = $"[补全成功] {matchInfo.Player.GameName} 战绩项:{matchInfo.MatchItems.Count}";
                         Debug.WriteLine(successLog);
-                        //File.AppendAllText(logFullPath, successLog + "\n");
                     }
                     else
                     {
@@ -237,7 +221,6 @@ namespace League.Managers
 
                         string failLog = $"[补全失败] {cardInfo.CurrentName}";
                         Debug.WriteLine(failLog);
-                        //File.AppendAllText(logFullPath, failLog + "\n");
                     }
 
                     await Task.Delay(250); // 补全间隔，防限流
@@ -246,13 +229,6 @@ namespace League.Managers
             catch (Exception ex)
             {
                 Debug.WriteLine($"[ValidateAndCompleteAllCards] 整体异常: {ex.Message}");
-                // 异常时也记录日志（但仅在补全过程中发生异常时才创建）
-                //string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-                //string logFileName = $"{timestamp}.txt";
-                //string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
-                //Directory.CreateDirectory(DebugPath);
-                //string logFullPath = Path.Combine(DebugPath, logFileName);
-                //File.AppendAllText(logFullPath, $"\n[整体异常] {ex.Message}\n{ex.StackTrace}\n");
             }
             finally
             {
@@ -434,26 +410,6 @@ namespace League.Managers
             if (player == null)
                 player = teamTwo?.FirstOrDefault(p => p["summonerId"]?.Value<long>() == summonerId);
             return player;
-        }
-
-        public void SaveTeamDataForDebug(JObject sessionData)
-        {
-            try
-            {
-                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-                string DebugPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Debug_teams");
-                Directory.CreateDirectory(DebugPath);
-
-                // 正确写法
-                File.WriteAllText(Path.Combine(DebugPath, $"session_{timestamp}.json"),
-                    sessionData.ToString(Formatting.Indented));
-
-                Debug.WriteLine($"[Debug] 已保存 session_{timestamp}.json");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[DebugSave] 保存失败: {ex.Message}");
-            }
         }
     }
 }
