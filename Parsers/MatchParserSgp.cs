@@ -1,7 +1,6 @@
 ﻿using League.Controls;
 using League.Models;
 using Newtonsoft.Json.Linq;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace League.Parsers
@@ -22,16 +21,6 @@ namespace League.Parsers
         private static readonly SemaphoreSlim _semaphore = new SemaphoreSlim(MAX_CONCURRENT_PARSING, MAX_CONCURRENT_PARSING);
 
         public event Action<string> PlayerIconClicked;
-
-        private static Image CreateDefaultImage(Color color)
-        {
-            Bitmap bmp = new Bitmap(32, 32);
-            using (Graphics g = Graphics.FromImage(bmp))
-            {
-                g.Clear(color);
-            }
-            return bmp;
-        }
 
         // 修改解析方法，使用 SemaphoreSlim 替代 lock
         public async Task<Panel> ParseGameToPanelFromSgpAsync(JObject game, string summonerId, string gameName, string tagLine, int index)
