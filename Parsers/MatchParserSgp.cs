@@ -364,6 +364,9 @@ namespace League.Parsers
         /// </summary>
         /// <param name="gameJson"></param>
         /// <returns></returns>
+        /// <summary>
+        /// 战绩列表中显示模式信息
+        /// </summary>
         private (string mode, string queueId) ExtractGameMode(JObject gameJson)
         {
             int queue = gameJson["queueId"]?.Value<int>()
@@ -383,61 +386,87 @@ namespace League.Parsers
                 if (queue == 4310 ||
                     string.Equals(gameMode, "JADE", StringComparison.OrdinalIgnoreCase))
                 {
-                    return ("经典召唤师峡谷", queueId);
+                    return ("经典峡谷", queueId);
                 }
                 if (queue == 3270 ||
                     string.Equals(gameMode, "KIWI", StringComparison.OrdinalIgnoreCase))
                 {
-                    return ("自定义 · 海克斯乱斗", queueId);
+                    return ("自定义海克斯", queueId);
                 }
                 if (string.Equals(gameMode, "PRACTICETOOL", StringComparison.OrdinalIgnoreCase))
                     return ("训练模式", queueId);
 
                 return gameMode?.ToLower() switch
                 {
-                    "classic" => ("自定义 · 召唤师峡谷", queueId),
-                    "aram" => ("自定义 · 极地大乱斗", queueId),
-                    "cherry" => ("自定义 · 海克斯乱斗", queueId),
-                    _ => ("自定义模式", queueId)
+                    "classic" => ("自定义峡谷", queueId),
+                    "aram" => ("自定义大乱斗", queueId),
+                    "cherry" => ("自定义海克斯", queueId),
+                    _ => ("自定义", queueId)
                 };
             }
 
             /* =========================
-             * 2️⃣ 官方匹配 / 排位
+             * 2️⃣ 官方匹配 / 排位 / 特殊模式
              * ========================= */
             switch (queue)
             {
+                // ========== 排位 ==========
                 case 420: return ("单双排", queueId);
                 case 440: return ("灵活排位", queueId);
-                case 400:
-                case 430: return ("匹配", queueId);
 
-                // 快速模式（已移除 890）
-                case 480:
-                case 1900: return ("快速模式", queueId);
+                // ========== 匹配 ==========
+                case 400: return ("匹配征召", queueId);
+                case 430: return ("匹配盲选", queueId);
 
-                // ========== 人机对战（完善） ==========
-                case 880: return ("人机 · 新手", queueId);
-                case 890: return ("人机 · 中等", queueId);
-                case 830: return ("人机 · 入门", queueId);
-                case 840:
-                case 850:
-                case 870: return ("人机对战", queueId);
-
+                // ========== 大乱斗 & 无限 ==========
                 case 450: return ("大乱斗", queueId);
-                case 900: return ("无限火力", queueId);
+                case 900: return ("无限乱斗", queueId);
+                case 1900: return ("自选无限火力", queueId);
+
+                // ========== 快速模式 ==========
+                case 480: return ("快速模式", queueId);
+
+                // ========== 斗魂 / 海克斯 ==========
+                case 1700: return ("斗魂竞技场", queueId);
+                case 2400: return ("海克斯乱斗", queueId);
+                case 2450: return ("经典海克斯乱斗", queueId);
+
+                // ========== 其他特殊模式 ==========
                 case 1020: return ("克隆大作战", queueId);
                 case 1300: return ("极限闪击", queueId);
                 case 1400: return ("终极魔典", queueId);
-                case 1700: return ("斗魂竞技场", queueId);
-                case 2400: return ("海克斯乱斗", queueId);
-                case 3270: return ("自定义 · 海克斯乱斗", queueId);
+                case 700: return ("冠军杯赛", queueId);
 
-                // 经典模式
-                case 4310: return ("经典召唤师峡谷", queueId);
-                case 2450: return ("经典海克斯乱斗", queueId);
-                case 4320: return ("经典模式人机", queueId);
+                // ========== 人机（完整） ==========
+                case 830: return ("人机入门", queueId);
+                case 840: return ("人机新手", queueId);
+                case 850: return ("人机中等", queueId);
+                case 870: return ("人机入门", queueId);
+                case 880: return ("人机新手", queueId);
+                case 890: return ("人机中等", queueId);
+
+                // ========== 新手教程 ==========
+                case 2000: return ("新手教程1", queueId);
+                case 2010: return ("新手教程2", queueId);
+                case 2020: return ("新手教程3", queueId);
+
+                // ========== 云顶之弈 ==========
+                case 1090: return ("云顶匹配", queueId);
+                case 1100: return ("云顶排位", queueId);
+                case 1130: return ("云顶疾速", queueId);
+                case 1160: return ("云顶双人", queueId);
+
+                // ========== 自定义 / 训练 / 经典 ==========
+                case 0: return ("自定义", queueId);
+                case 3100: return ("自定义峡谷", queueId);
                 case 3140: return ("训练模式", queueId);
+                case 3270: return ("自定义海克斯", queueId);
+                case 4310: return ("经典峡谷", queueId);
+                case 4320: return ("经典人机", queueId);
+
+                // ========== 末日人机 ==========
+                case 950:
+                case 960: return ("末日人机", queueId);
             }
 
             /* =========================
@@ -456,14 +485,15 @@ namespace League.Parsers
                     "classic" => ("召唤师峡谷", queueId),
                     "aram" => ("大乱斗", queueId),
                     "cherry" => ("斗魂竞技场", queueId),
-                    "jade" => ("经典召唤师峡谷", queueId),
+                    "jade" => ("经典峡谷", queueId),
+                    "urf" => ("无限乱斗", queueId),
+                    "tutorial" => ("新手教程", queueId),
                     _ => ($"未知模式({queue})", queueId)
                 };
             }
 
             return ($"未知模式({queue})", queueId);
         }
-        
 
         private (int damageRank, int goldRank, int kpRank) CalculateRanks(JArray participants, JObject selfParticipant, int selfDamage, int selfGold, double selfKP)
         {

@@ -92,7 +92,8 @@ namespace League.Clients
         }
 
         /// <summary>
-        /// ARAM 大乱斗自动抢英雄
+        /// ARAM 模式自动抢英雄
+        /// 支持模式：450=大乱斗、2400=海克斯乱斗、900=无限乱斗
         /// </summary>
         public async Task AutoSwapToHighestPriorityAsync(List<PreliminaryHero> preSelectedHeroes)
         {
@@ -105,7 +106,9 @@ namespace League.Clients
                 if (session == null) return;
 
                 var queueId = session["queueId"]?.Value<int>() ?? 0;
-                if (queueId != 450 && queueId != 2400) return; // 只有非ARAM模式才返回
+
+                // 只有非ARAM模式才返回，450=大乱斗、2400=海克斯乱斗、900=无限乱斗
+                if (queueId != 450 && queueId != 2400 && queueId != 900) return; 
 
                 var myCellId = session["localPlayerCellId"]?.Value<int>() ?? -1;
                 if (myCellId == -1) return;

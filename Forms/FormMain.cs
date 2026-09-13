@@ -151,11 +151,13 @@ namespace League
                 _matchQueryProcessor?.SetFilterMode(_appConfig.FilterByGameMode);
                 _matchQueryProcessor?.SetMatchHistoryCount(_appConfig.CardMatchHistoryCount);
 
-                chkNormal.Checked = _appConfig.EnablePreliminaryInNormal;   //匹配
-                chkRanked.Checked = _appConfig.EnablePreliminaryInRanked;   //排位
-                chkAram.Checked = _appConfig.EnablePreliminaryInAram;       //大乱斗
-                chkNexus.Checked = _appConfig.EnablePreliminaryInNexusBlitz;    //海克斯乱斗
+                chkNormal.Checked = _appConfig.EnablePreliminaryInNormal;   // 匹配
+                chkRanked.Checked = _appConfig.EnablePreliminaryInRanked;   // 排位
+                chkAram.Checked = _appConfig.EnablePreliminaryInAram;       // 大乱斗
+                chkNexus.Checked = _appConfig.EnablePreliminaryInNexusBlitz;    // 海克斯乱斗
                 chkAutoAccept.Checked = _appConfig.EnableAutoAcceptQueue;   // 自动接受对局
+                chkUrf.Checked = _appConfig.EnablePreliminaryInUrf;             // 无限乱斗（900）
+                chkPickUrf.Checked = _appConfig.EnablePreliminaryInPickUrf;     // 无限火力（1900）
 
                 // 恢复自动接受对局延时配置
                 cboAutoAcceptDelay.SelectedIndex = _appConfig.AutoAcceptDelaySeconds switch
@@ -200,6 +202,8 @@ namespace League
                 chkRanked.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkAram.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkNexus.CheckedChanged += ModeCheckBox_CheckedChanged;
+                chkUrf.CheckedChanged += ModeCheckBox_CheckedChanged;
+                chkPickUrf.CheckedChanged += ModeCheckBox_CheckedChanged;
                 chkAutoAccept.CheckedChanged += AutoAccept_CheckedChanged;
                 cboAutoAcceptDelay.SelectedIndexChanged += cboAutoAcceptDelay_SelectedIndexChanged;
                 chkHideSelf.CheckedChanged += HideSelf_CheckedChanged;
@@ -728,10 +732,12 @@ namespace League
         {
             if (_appConfig == null) return;
 
-            _appConfig.EnablePreliminaryInNormal = chkNormal.Checked;
-            _appConfig.EnablePreliminaryInRanked = chkRanked.Checked;
-            _appConfig.EnablePreliminaryInAram = chkAram.Checked;
-            _appConfig.EnablePreliminaryInNexusBlitz = chkNexus.Checked;
+            _appConfig.EnablePreliminaryInNormal = chkNormal.Checked;     // 匹配
+            _appConfig.EnablePreliminaryInRanked = chkRanked.Checked;     // 排位，单双/灵活
+            _appConfig.EnablePreliminaryInAram = chkAram.Checked;         // 大乱斗
+            _appConfig.EnablePreliminaryInNexusBlitz = chkNexus.Checked;  // 海克斯乱斗
+            _appConfig.EnablePreliminaryInUrf = chkUrf.Checked;           // 无限乱斗
+            _appConfig.EnablePreliminaryInPickUrf = chkPickUrf.Checked;   // 无限火力
 
             SaveAppConfig(); // 立即保存到 LeagueConfig.json
 

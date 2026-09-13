@@ -77,6 +77,8 @@ namespace League
             txtCustomContent = new TextBox();
             rbModeCustom = new RadioButton();
             rbModeMatch = new RadioButton();
+            chkPickUrf = new CheckBox();
+            chkUrf = new CheckBox();
             panel1.SuspendLayout();
             imageTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
@@ -444,6 +446,8 @@ namespace League
             // 
             // groupBox1
             // 
+            groupBox1.Controls.Add(chkPickUrf);
+            groupBox1.Controls.Add(chkUrf);
             groupBox1.Controls.Add(chkNexus);
             groupBox1.Controls.Add(chkAram);
             groupBox1.Controls.Add(chkRanked);
@@ -591,6 +595,26 @@ namespace League
             rbModeMatch.Text = "发送战绩信息";
             rbModeMatch.UseVisualStyleBackColor = true;
             // 
+            // chkPickUrf
+            // 
+            chkPickUrf.AutoSize = true;
+            chkPickUrf.Location = new Point(314, 89);
+            chkPickUrf.Name = "chkPickUrf";
+            chkPickUrf.Size = new Size(123, 21);
+            chkPickUrf.TabIndex = 11;
+            chkPickUrf.Text = "无限火力（自选）";
+            chkPickUrf.UseVisualStyleBackColor = true;
+            // 
+            // chkUrf
+            // 
+            chkUrf.AutoSize = true;
+            chkUrf.Location = new Point(314, 62);
+            chkUrf.Name = "chkUrf";
+            chkUrf.Size = new Size(123, 21);
+            chkUrf.TabIndex = 10;
+            chkUrf.Text = "无限乱斗（随机）";
+            chkUrf.UseVisualStyleBackColor = true;
+            // 
             // FormMain
             // 
             AutoScaleDimensions = new SizeF(7F, 17F);
@@ -672,5 +696,7 @@ namespace League
         private Label label9;
         private ComboBox cboCardMatchCount;
         private Label label10;
+        private CheckBox chkPickUrf;
+        private CheckBox chkUrf;
     }
 }

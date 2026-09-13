@@ -24,10 +24,12 @@ namespace League.Models
 
         // ==================== 新增：各模式自动预选开关 ====================
         // 默认全开，确保升级后旧用户行为不变
-        public bool EnablePreliminaryInNormal { get; set; } = true;    // 匹配（盲选/征召）
-        public bool EnablePreliminaryInRanked { get; set; } = true;    // 排位（单双/灵活）
-        public bool EnablePreliminaryInAram { get; set; } = true;      // 大乱斗
-        public bool EnablePreliminaryInNexusBlitz { get; set; } = true; // 海克斯大乱斗（2400）
+        public bool EnablePreliminaryInNormal { get; set; } = false;    // 匹配（盲选/征召）
+        public bool EnablePreliminaryInRanked { get; set; } = false;    // 排位（单双/灵活）
+        public bool EnablePreliminaryInAram { get; set; } = false;      // 大乱斗
+        public bool EnablePreliminaryInNexusBlitz { get; set; } = false; // 海克斯大乱斗（2400）
+        public bool EnablePreliminaryInUrf { get; set; } = false;          // 无限乱斗（900，随机）
+        public bool EnablePreliminaryInPickUrf { get; set; } = false;      // 无限火力（1900，自选）
 
         // ==================== 新增：战绩/自定义文本发送配置 ====================
 

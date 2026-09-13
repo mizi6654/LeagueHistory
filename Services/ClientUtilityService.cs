@@ -38,7 +38,7 @@ namespace League.Services
         public (bool AnyKilled, string Message) CloseAllClients()
         {
             int killed = 0;
-            foreach (var name in new[] { "LeagueClient", "LeagueClientUx", "LeagueClientUxRender" })
+            foreach (var name in new[] { "LeagueClient", "LeagueClientUx", "LeagueClientUxRender" , "League of Legends" })
             {
                 try
                 {

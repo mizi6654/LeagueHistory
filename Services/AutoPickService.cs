@@ -50,8 +50,9 @@ namespace League.Services
 
                         var session = await Globals.lcuClient.GetChampSelectSession();
                         int queueId = session?["queueId"]?.Value<int>() ?? 0;
-                        int delay = (queueId == 450 || queueId == 2400) ? 500 : 1000;
 
+                        // 乱斗类轮询更快，其它模式 1 秒
+                        int delay = (queueId == 450 || queueId == 2400 || queueId == 900) ? 500 : 1000;
                         await Task.Delay(delay, token);
                     }
                     catch (TaskCanceledException) { break; }
@@ -81,7 +82,6 @@ namespace League.Services
         /// </summary>
         private async Task TryAutoPreliminaryAsync()
         {
-            // 先检查全局是否启用自动预选
             var preConfig = _form.GetAppConfig()?.Preliminary;
             if (preConfig == null || !preConfig.EnableAutoPreliminary)
                 return;
@@ -99,35 +99,26 @@ namespace League.Services
             // 根据 queueId 和用户配置决定是否执行
             bool shouldExecute = queueId switch
             {
-                // 匹配模式：盲选(430)、征召(400)等
-                400 or 430 => _form.GetAppConfig().EnablePreliminaryInNormal,
-
-                // 排位模式：单双排(420)、灵活选排(440)
-                420 or 440 => _form.GetAppConfig().EnablePreliminaryInRanked,
-
-                // 大乱斗
-                450 => _form.GetAppConfig().EnablePreliminaryInAram,
-
-                // 海克斯大乱斗（Nexus Blitz / Hexakill ARAM）
-                2400 => _form.GetAppConfig().EnablePreliminaryInNexusBlitz,
-
-                _ => false // 其他模式一律不执行
+                400 or 430 => _form.GetAppConfig().EnablePreliminaryInNormal,      // 匹配
+                420 or 440 => _form.GetAppConfig().EnablePreliminaryInRanked,      // 排位
+                450 => _form.GetAppConfig().EnablePreliminaryInAram,        // 大乱斗
+                2400 => _form.GetAppConfig().EnablePreliminaryInNexusBlitz,  // 海克斯
+                900 => _form.GetAppConfig().EnablePreliminaryInUrf,         // 无限乱斗（随机）
+                1900 => _form.GetAppConfig().EnablePreliminaryInPickUrf,     // 无限火力（自选）
+                _ => false
             };
 
             if (!shouldExecute)
-            {
-                //Debug.WriteLine($"[自动预选] 当前模式 queueId={queueId} 未勾选，跳过自动预选");
                 return;
-            }
 
-            // 自动预选英雄，大乱斗与海克斯大乱斗
-            if (queueId == 450 || queueId == 2400) // ARAM 类模式：一直抢最高优先级
+            // 有板凳席的乱斗类模式：大乱斗、海克斯、无限乱斗 → 抢英雄
+            if (queueId == 450 || queueId == 2400 || queueId == 900)
             {
                 await Globals.lcuClient.AutoSwapToHighestPriorityAsync(preList);
                 return;
             }
 
-            // 自动预选，普通匹配模式与排位
+            // 普通自选模式：匹配、排位、无限火力 → 只预选一次
             if (_hasAutoPreliminated) return;
 
             bool success = await Globals.lcuClient.AutoDeclareIntentAsync(preList);
