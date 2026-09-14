@@ -24,6 +24,13 @@ namespace League.Networking
             parentMap.Clear();
             colorIndex = 0;
 
+            // 过滤掉 Puuid 为空的，避免 Dictionary key 为 null
+            players = players
+                .Where(p => p?.Player != null && !string.IsNullOrEmpty(p.Player.Puuid))
+                .ToList();
+
+            if (players.Count == 0) return;
+
             // 初始化并查集
             foreach (var p in players)
                 parentMap[p.Player.Puuid] = p.Player.Puuid;

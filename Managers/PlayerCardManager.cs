@@ -116,7 +116,13 @@ namespace League.Managers
 
                 // 组队检测 & 名字颜色
                 var detector = new PartyDetector();
-                detector.Detect(fetchedInfos.Where(f => f != null).ToList());
+                //detector.Detect(fetchedInfos.Where(f => f != null).ToList());
+                // 组队检测，过滤puuid为空的玩家，如隐藏玩家不做判断
+                detector.Detect(
+                    fetchedInfos
+                        .Where(f => f?.Player != null && !string.IsNullOrEmpty(f.Player.Puuid))
+                        .ToList()
+                );
 
                 foreach (var info in fetchedInfos)
                 {

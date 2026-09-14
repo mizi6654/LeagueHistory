@@ -24,23 +24,31 @@ namespace League.Services
             _cardManager = cardManager;
         }
 
+        /// <summary>
+        /// 双方加载 + 强化面板准备
+        /// </summary>
+        /// <returns></returns>
         public async Task EnterChampSelectAsync()
         {
-            // 清理等待面板 + 准备对战面板
             FormUiStateManager.SafeInvoke(_form, () =>
             {
+                // 清掉「正在检测连接 / 等待游戏」一类状态 Panel
+                var toRemove = _form.penalGameMatchData.Controls
+                    .OfType<Panel>()
+                    .Where(p => p != _form.tableLayoutPanel1)
+                    .ToList();
+                foreach (var p in toRemove)
+                {
+                    _form.penalGameMatchData.Controls.Remove(p);
+                    p.Dispose();
+                }
+
                 if (_form._waitingPanel != null)
                 {
-                    _form.BeginInvoke(new Action(() =>
-                    {
-                        if (_form.penalGameMatchData.Controls.Contains(_form._waitingPanel))
-                            _form.penalGameMatchData.Controls.Remove(_form._waitingPanel);
-
-                        _form._waitingPanel.Dispose();
-                        _form._waitingPanel = null;
-                        _form.penalGameMatchData.Invalidate();
-                        _form.penalGameMatchData.Update();
-                    }));
+                    if (_form.penalGameMatchData.Controls.Contains(_form._waitingPanel))
+                        _form.penalGameMatchData.Controls.Remove(_form._waitingPanel);
+                    _form._waitingPanel.Dispose();
+                    _form._waitingPanel = null;
                 }
 
                 _form.tableLayoutPanel1.Controls.Clear();
@@ -49,12 +57,85 @@ namespace League.Services
 
                 if (!_form.penalGameMatchData.Controls.Contains(_form.tableLayoutPanel1))
                     _form.penalGameMatchData.Controls.Add(_form.tableLayoutPanel1);
+
+                _form.tableLayoutPanel1.BringToFront();
+                _form.penalGameMatchData.Invalidate();
+                _form.penalGameMatchData.Update();
             });
 
             // 重置快照
             _lastTeamStructureSnapshot = "";
             _lastChampSelectSnapshotString = "";
             _form.lastChampSelectSnapshotString = "";
+
+            await Task.CompletedTask;
+        }
+
+        public async Task ShowBothTeamsFromGameSessionAsync()
+        {
+            try
+            {
+                var currentSummoner = await Globals.lcuClient.GetCurrentSummoner();
+                if (currentSummoner == null)
+                {
+                    Debug.WriteLine("[ShowBothTeams] 当前召唤师为空");
+                    return;
+                }
+
+                string myPuuid = currentSummoner["puuid"]?.ToString() ?? "";
+                if (string.IsNullOrEmpty(myPuuid)) return;
+
+                var sessionData = await Globals.lcuClient.GetGameSession();
+                if (sessionData == null)
+                {
+                    Debug.WriteLine("[ShowBothTeams] GameSession 为空");
+                    return;
+                }
+
+                int queueId = sessionData["gameData"]?["queue"]?["id"]?.Value<int>() ?? 0;
+                Globals.CurrGameMod = queueId.ToString();
+
+                var teamOne = sessionData["gameData"]?["teamOne"] as JArray;
+                var teamTwo = sessionData["gameData"]?["teamTwo"] as JArray;
+                var selections = sessionData["gameData"]?["playerChampionSelections"] as JArray;
+
+                if (selections != null && selections.Count >= 1)
+                {
+                    (teamOne, teamTwo) = _cardManager.EnsureAllPlayersPresent(teamOne, teamTwo, selections);
+                    Debug.WriteLine($"[EnsurePlayers] 补全后 → Team1:{teamOne?.Count ?? 0} | Team2:{teamTwo?.Count ?? 0}");
+                }
+
+                if (teamOne == null || teamTwo == null)
+                {
+                    Debug.WriteLine("[ShowBothTeams] teamOne/teamTwo 为空");
+                    return;
+                }
+
+                bool isInTeamOne = teamOne.Any(t => t["puuid"]?.ToString() == myPuuid);
+                JArray myTeam = isInTeamOne ? teamOne : teamTwo;
+                JArray enemyTeam = isInTeamOne ? teamTwo : teamOne;
+                int myRow = isInTeamOne ? 0 : 1;
+                int enemyRow = isInTeamOne ? 1 : 0;
+
+                Debug.WriteLine($"[ShowBothTeams] 我方 row={myRow} count={myTeam.Count} | 敌方 row={enemyRow} count={enemyTeam.Count}");
+
+                await _cardManager.CreateBasicCardsOnly(myTeam, isMyTeam: true, row: myRow);
+                await _cardManager.FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: myRow);
+                _form._cachedMyTeam = myTeam;
+
+                await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
+                await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
+                _form._cachedEnemyTeam = enemyTeam;
+
+                await Task.Delay(500);
+                await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
+
+                Debug.WriteLine("[ShowBothTeams] 双方卡片加载完成");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ShowBothTeams] 异常: {ex}");
+            }
         }
 
         public async Task ShowMyTeamCards()

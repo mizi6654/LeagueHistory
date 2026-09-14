@@ -1,6 +1,7 @@
 ﻿using League.PrimaryElection;
 using League.Services;
 using Newtonsoft.Json.Linq;
+using System.Diagnostics;
 
 namespace League.Clients
 {
@@ -12,7 +13,6 @@ namespace League.Clients
         private LcuConnectionManager _connectionManager;
         private ServiceFactory _serviceFactory;
         private MessageServiceManager _messageManager;
-
         private LcuClient _lcuClient;
 
         // 服务实例
@@ -23,6 +23,7 @@ namespace League.Clients
         private ReplayService _replayService;
         private ChampionSelectService _championSelectService;
         private ChatService _chatService;
+
 
         public ChatService ChatService => _chatService;
 
@@ -58,6 +59,46 @@ namespace League.Clients
             _messageManager = new MessageServiceManager(_chatService);
 
             return true;
+        }
+
+        /// <summary>
+        /// 注入已经由 LcuManager 建立好的 LcuClient（不再自己去连）
+        /// </summary>
+        public bool AttachExistingClient(LcuClient client)
+        {
+            if (client == null)
+            {
+                Debug.WriteLine("[LcuSession] AttachExistingClient: client 为 null");
+                return false;
+            }
+
+            try
+            {
+                _lcuClient = client;
+
+                // 必须重新创建所有 Service
+                if (_serviceFactory == null)
+                    _serviceFactory = new ServiceFactory();
+
+                InitializeServices();
+
+                _messageManager = new MessageServiceManager(_chatService);
+
+                // 自检
+                if (_gameflowService == null)
+                {
+                    Debug.WriteLine("[LcuSession] 警告：InitializeServices 后 _gameflowService 仍为 null");
+                    return false;
+                }
+
+                Debug.WriteLine("[LcuSession] 已成功注入现有 LcuClient，Services 已就绪");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[LcuSession] 注入失败: {ex}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -143,10 +184,15 @@ namespace League.Clients
         // ============ 游戏流程相关方法 ============
 
         /// <summary>
-        /// 获取游戏流程阶段
+        /// 获取游戏流程阶段（增加空保护）
         /// </summary>
         public async Task<string> GetGameflowPhase()
         {
+            if (_gameflowService == null)
+            {
+                Debug.WriteLine("[LcuSession] GetGameflowPhase: _gameflowService 为 null，尚未注入");
+                return null;
+            }
             return await _gameflowService.GetGameflowPhaseAsync();
         }
 
