@@ -64,6 +64,8 @@ namespace League
             lk_GitPro = new LinkLabel();
             label4 = new Label();
             groupBox1 = new GroupBox();
+            chkPickUrf = new CheckBox();
+            chkUrf = new CheckBox();
             chkNexus = new CheckBox();
             chkAram = new CheckBox();
             chkRanked = new CheckBox();
@@ -77,8 +79,6 @@ namespace League
             txtCustomContent = new TextBox();
             rbModeCustom = new RadioButton();
             rbModeMatch = new RadioButton();
-            chkPickUrf = new CheckBox();
-            chkUrf = new CheckBox();
             panel1.SuspendLayout();
             imageTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
@@ -251,12 +251,12 @@ namespace League
             // 
             // label10
             // 
-            label10.AutoSize = true;
-            label10.Location = new Point(16, 552);
+            label10.Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Regular, GraphicsUnit.Point, 134);
+            label10.Location = new Point(16, 571);
             label10.Name = "label10";
-            label10.Size = new Size(860, 17);
+            label10.Size = new Size(860, 45);
             label10.TabIndex = 16;
-            label10.Text = "注意：如果登录了游戏，还一直显示连接中，请右键，以管理员方式运行软件，另外，如已经进入了游戏内再打开是无法使用的，必须是游戏开始前，或者结束后";
+            label10.Text = "注意：如果已经进入了游戏内再打开软件，发现无法加载双方队伍卡片战绩，那么请查看是否勾选了“在游戏期间关闭客户端”的配置，取消勾选之后在游戏内打开软件就能正常显示双方队伍战绩及发送消息等功能";
             // 
             // groupBox3
             // 
@@ -460,6 +460,26 @@ namespace League
             groupBox1.TabStop = false;
             groupBox1.Text = "英雄预选 - 位置信息根据英雄联盟攻略中心数据划分";
             // 
+            // chkPickUrf
+            // 
+            chkPickUrf.AutoSize = true;
+            chkPickUrf.Location = new Point(314, 89);
+            chkPickUrf.Name = "chkPickUrf";
+            chkPickUrf.Size = new Size(123, 21);
+            chkPickUrf.TabIndex = 11;
+            chkPickUrf.Text = "无限火力（自选）";
+            chkPickUrf.UseVisualStyleBackColor = true;
+            // 
+            // chkUrf
+            // 
+            chkUrf.AutoSize = true;
+            chkUrf.Location = new Point(314, 62);
+            chkUrf.Name = "chkUrf";
+            chkUrf.Size = new Size(123, 21);
+            chkUrf.TabIndex = 10;
+            chkUrf.Text = "无限乱斗（随机）";
+            chkUrf.UseVisualStyleBackColor = true;
+            // 
             // chkNexus
             // 
             chkNexus.AutoSize = true;
@@ -555,7 +575,7 @@ namespace League
             label3.Name = "label3";
             label3.Size = new Size(440, 67);
             label3.TabIndex = 4;
-            label3.Text = "发送自定义信息：将要发送的内容输入进行，默认一行一条，然后在【选人窗口/游戏内聊天】会根据输入的文本进行发送，快捷键同上";
+            label3.Text = "发送自定义信息：将要发送的内容输入进行，默认一行一条，然后在【选人窗口/游戏内聊天】会根据输入的文本进行发送，快捷键同上，需要自己按[tab]切换发送队伍或者所有人";
             // 
             // label2
             // 
@@ -594,26 +614,6 @@ namespace League
             rbModeMatch.TabStop = true;
             rbModeMatch.Text = "发送战绩信息";
             rbModeMatch.UseVisualStyleBackColor = true;
-            // 
-            // chkPickUrf
-            // 
-            chkPickUrf.AutoSize = true;
-            chkPickUrf.Location = new Point(314, 89);
-            chkPickUrf.Name = "chkPickUrf";
-            chkPickUrf.Size = new Size(123, 21);
-            chkPickUrf.TabIndex = 11;
-            chkPickUrf.Text = "无限火力（自选）";
-            chkPickUrf.UseVisualStyleBackColor = true;
-            // 
-            // chkUrf
-            // 
-            chkUrf.AutoSize = true;
-            chkUrf.Location = new Point(314, 62);
-            chkUrf.Name = "chkUrf";
-            chkUrf.Size = new Size(123, 21);
-            chkUrf.TabIndex = 10;
-            chkUrf.Text = "无限乱斗（随机）";
-            chkUrf.UseVisualStyleBackColor = true;
             // 
             // FormMain
             // 

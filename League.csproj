@@ -6,10 +6,8 @@
 		<UseWindowsForms>true</UseWindowsForms>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<ApplicationIcon>favicon.ico</ApplicationIcon>
+		<ApplicationManifest>app.manifest</ApplicationManifest>
 	</PropertyGroup>
-	<ItemGroup>
-	  <AdditionalFiles Remove="app.manifest" />
-	</ItemGroup>
 
 	<ItemGroup>
 	  <Content Include="favicon.ico" />
