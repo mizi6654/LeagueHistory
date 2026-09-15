@@ -103,12 +103,13 @@ namespace League.Managers
             card.Tag = player.SummonerId;
 
             string name = player.GameName ?? "未知";
+            string fullName = !string.IsNullOrEmpty(player.FullName) ? player.FullName : name;
             string soloRank = string.IsNullOrEmpty(player.SoloRank) ? "未知" : player.SoloRank;
             string flexRank = string.IsNullOrEmpty(player.FlexRank) ? "未知" : player.FlexRank;
 
             // 关键调用
             card.SetPlayerInfo(name, soloRank, flexRank, player.Avatar, player.IsPublic,
-                matchInfo.MatchItems, player.NameColor, player.SummonerId, player.ChampionId, puuid ?? player.Puuid ?? "");
+                matchInfo.MatchItems, player.NameColor, player.SummonerId, player.ChampionId, puuid ?? player.Puuid ?? "", fullName);
 
             // 【修复点】必须设置 SmallImageList
             if (matchInfo.HeroIcons != null)
@@ -122,18 +123,6 @@ namespace League.Managers
 
             // 注册到缓存
             _form._playerCardManager?.RegisterCard(player.SummonerId, card);   // 注意：这里需要 FormMain 里有 _playerCardManager
-
-            // 此为异步更新UI方法
-            //FormUiStateManager.SafeInvoke(_form.tableLayoutPanel1, () =>
-            //{
-            //    var oldControl = _form.tableLayoutPanel1.GetControlFromPosition(column, row);
-            //    if (oldControl != null)
-            //    {
-            //        _form.tableLayoutPanel1.Controls.Remove(oldControl);
-            //        oldControl.Dispose();
-            //    }
-            //    _form.tableLayoutPanel1.Controls.Add(panel, column, row);
-            //});
 
             // 此为同步更新UI方法
             FormUiStateManager.SafeInvokeSync(_form.tableLayoutPanel1, () =>
@@ -160,6 +149,11 @@ namespace League.Managers
             {
                 var p = matchInfo.Player;
                 card.lblPlayerName.Text = p.GameName ?? "未知玩家";
+
+                // 更新完整名称
+                string full = !string.IsNullOrEmpty(p.FullName) ? p.FullName : (p.GameName ?? "");
+                card.SetFullPlayerName(full);
+
                 card.lblSoloRank.Text = p.SoloRank ?? "未知";
                 card.lblFlexRank.Text = p.FlexRank ?? "未知";
                 card.lblPrivacyStatus.Text = p.IsPublic ?? "隐藏";

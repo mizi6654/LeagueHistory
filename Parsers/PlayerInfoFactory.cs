@@ -28,6 +28,7 @@ namespace League.Parsers
                     ChampionName = championName,
                     Avatar = championIcon,
                     GameName = "隐藏玩家",
+                    FullName = "隐藏玩家",
                     SoloRank = "隐藏",
                     FlexRank = "隐藏",
                     IsPublic = "隐藏",

@@ -116,7 +116,7 @@
             // 
             lblPrivacyStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             lblPrivacyStatus.AutoSize = true;
-            lblPrivacyStatus.Location = new Point(176, 3);
+            lblPrivacyStatus.Location = new Point(183, 4);
             lblPrivacyStatus.Name = "lblPrivacyStatus";
             lblPrivacyStatus.Size = new Size(32, 17);
             lblPrivacyStatus.TabIndex = 5;

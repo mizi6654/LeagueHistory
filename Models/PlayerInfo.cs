@@ -2,6 +2,10 @@
 {
     public class PlayerInfo
     {
+        /// <summary>
+        /// 完整玩家名称，格式：游戏名#标签  例如 "总有狗喜欢投降#65905"
+        /// 用于点击复制
+        /// </summary>
         public string FullName { get; set; } // 如 "总有狗喜欢投降#65905"
 
         public Image Avatar { get; set; }
@@ -12,6 +16,10 @@
 
         public string Puuid { get; set; }
         public long SummonerId { get; set; }
+
+        /// <summary>
+        /// 仅游戏名部分（不含 #标签），用于卡片显示
+        /// </summary>
         public string GameName { get; set; }     // 玩家名称
         public int ChampionId { get; set; }      // 英雄ID
         public string ChampionName { get; set; } // 英雄英文名

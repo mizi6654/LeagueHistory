@@ -153,6 +153,9 @@ namespace League.Parsers
                 ? "公开" : "隐藏";
             puuid = summonerInfo?["puuid"]?.ToString() ?? puuid;
 
+            // 拼接完整名称
+            string fullName = string.IsNullOrEmpty(tagLine) ? gameName : $"{gameName}#{tagLine}";
+
             if (string.IsNullOrEmpty(puuid) || puuid.Length < 10)
             {
                 return _factory.CreateHiddenPlayerInfo(0, championId);
@@ -173,7 +176,8 @@ namespace League.Parsers
                 ChampionId = championId,
                 ChampionName = Globals.resLoading.GetChampionById(championId)?.Name ?? "Unknown",
                 Avatar = await Globals.resLoading.GetChampionIconAsync(championId),
-                GameName = string.IsNullOrEmpty(tagLine) ? gameName : gameName,
+                GameName = gameName,          // 短名字（显示用）
+                FullName = fullName,          // 完整名字（复制用）  ← 关键
                 SoloRank = soloRank,
                 FlexRank = flexRank,
                 IsPublic = privacyStatus
