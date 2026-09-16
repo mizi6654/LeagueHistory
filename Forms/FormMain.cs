@@ -144,7 +144,7 @@ namespace League
                 {
                     10 => 0,    // 第 0 项 = 10
                     30 => 2,    // 第 2 项 = 30（注释写成「第2项」容易误会）
-                    50 => 3,    
+                    50 => 3,
                     _ => 1      // 实际是 index==1 → 20，不是「第4项」
                 };
 
@@ -940,7 +940,7 @@ namespace League
             SaveAppConfig();
             Debug.WriteLine($"[游戏结束配置] 跳过结算界面 已更新: {_appConfig.EnableSkipEndOfGameStats}");
         }
-        
+
         #endregion
 
         #region 静态全局类
