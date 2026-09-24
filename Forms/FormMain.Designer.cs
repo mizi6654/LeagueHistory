@@ -44,7 +44,6 @@ namespace League
             tabPage3 = new TabPage();
             tabControl1 = new TabControl();
             tabPage4 = new TabPage();
-            label10 = new Label();
             groupBox3 = new GroupBox();
             label9 = new Label();
             cboCardMatchCount = new ComboBox();
@@ -233,7 +232,6 @@ namespace League
             // 
             // tabPage4
             // 
-            tabPage4.Controls.Add(label10);
             tabPage4.Controls.Add(groupBox3);
             tabPage4.Controls.Add(groupBox2);
             tabPage4.Controls.Add(lk_QQGroup);
@@ -249,15 +247,6 @@ namespace League
             tabPage4.Text = "功能辅助";
             tabPage4.UseVisualStyleBackColor = true;
             // 
-            // label10
-            // 
-            label10.Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Regular, GraphicsUnit.Point, 134);
-            label10.Location = new Point(16, 571);
-            label10.Name = "label10";
-            label10.Size = new Size(860, 45);
-            label10.TabIndex = 16;
-            label10.Text = "注意：如果已经进入了游戏内再打开软件，发现无法加载双方队伍卡片战绩，那么请查看是否勾选了“在游戏期间关闭客户端”的配置，取消勾选之后在游戏内打开软件就能正常显示双方队伍战绩及发送消息等功能";
-            // 
             // groupBox3
             // 
             groupBox3.Controls.Add(label9);
@@ -270,7 +259,7 @@ namespace League
             groupBox3.Controls.Add(chkSkipHonor);
             groupBox3.Location = new Point(16, 6);
             groupBox3.Name = "groupBox3";
-            groupBox3.Size = new Size(905, 126);
+            groupBox3.Size = new Size(1077, 126);
             groupBox3.TabIndex = 15;
             groupBox3.TabStop = false;
             groupBox3.Text = "自动化功能";
@@ -362,7 +351,7 @@ namespace League
             groupBox2.Controls.Add(btnRestartUx);
             groupBox2.Location = new Point(16, 295);
             groupBox2.Name = "groupBox2";
-            groupBox2.Size = new Size(905, 116);
+            groupBox2.Size = new Size(1077, 116);
             groupBox2.TabIndex = 14;
             groupBox2.TabStop = false;
             groupBox2.Text = "UI辅助";
@@ -455,7 +444,7 @@ namespace League
             groupBox1.Controls.Add(lkbPreliminary);
             groupBox1.Location = new Point(16, 154);
             groupBox1.Name = "groupBox1";
-            groupBox1.Size = new Size(905, 124);
+            groupBox1.Size = new Size(1077, 124);
             groupBox1.TabIndex = 6;
             groupBox1.TabStop = false;
             groupBox1.Text = "英雄预选 - 位置信息根据英雄联盟攻略中心数据划分";
@@ -624,7 +613,7 @@ namespace League
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "联盟视界 League v1.1.0";
+            Text = "联盟视界 League v1.1.1";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
             imageTabControl1.ResumeLayout(false);
@@ -695,7 +684,6 @@ namespace League
         private Label lblAutoAcceptDelay;
         private Label label9;
         private ComboBox cboCardMatchCount;
-        private Label label10;
         private CheckBox chkPickUrf;
         private CheckBox chkUrf;
     }

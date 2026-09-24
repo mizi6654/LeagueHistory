@@ -107,15 +107,27 @@ namespace League.Managers
             string soloRank = string.IsNullOrEmpty(player.SoloRank) ? "未知" : player.SoloRank;
             string flexRank = string.IsNullOrEmpty(player.FlexRank) ? "未知" : player.FlexRank;
 
-            // 关键调用
-            card.SetPlayerInfo(name, soloRank, flexRank, player.Avatar, player.IsPublic,
-                matchInfo.MatchItems, player.NameColor, player.SummonerId, player.ChampionId, puuid ?? player.Puuid ?? "", fullName);
+            //// 关键调用
+            //card.SetPlayerInfo(name, soloRank, flexRank, player.Avatar, player.IsPublic,
+            //    matchInfo.MatchItems, player.NameColor, player.SummonerId, player.ChampionId, puuid ?? player.Puuid ?? "", fullName);
 
-            // 【修复点】必须设置 SmallImageList
+            //// 【修复点】必须设置 SmallImageList
+            //if (matchInfo.HeroIcons != null)
+            //{
+            //    card.ListViewControl.SmallImageList = matchInfo.HeroIcons;
+            //}
+
+            //card.ListViewControl.View = View.Details;
+
+            // 先 ImageList 再 SetPlayerInfo
             if (matchInfo.HeroIcons != null)
             {
                 card.ListViewControl.SmallImageList = matchInfo.HeroIcons;
             }
+
+            card.SetPlayerInfo(name, soloRank, flexRank, player.Avatar, player.IsPublic,
+                matchInfo.MatchItems, player.NameColor, player.SummonerId, player.ChampionId,
+                puuid ?? player.Puuid ?? "", fullName);
 
             card.ListViewControl.View = View.Details;
 
@@ -137,20 +149,62 @@ namespace League.Managers
             });
         }
 
+        //public void UpdateCardUI(PlayerCardControl card, PlayerMatchInfo matchInfo)
+        //{
+        //    if (card == null || card.IsDisposed || matchInfo?.Player == null) return;
+
+        //    // 此为异步
+        //    //FormUiStateManager.SafeInvoke(card, () =>
+
+        //    // 此为同步
+        //    FormUiStateManager.SafeInvokeSync(card, () =>
+        //    {
+        //        var p = matchInfo.Player;
+        //        card.lblPlayerName.Text = p.GameName ?? "未知玩家";
+
+        //        // 更新完整名称
+        //        string full = !string.IsNullOrEmpty(p.FullName) ? p.FullName : (p.GameName ?? "");
+        //        card.SetFullPlayerName(full);
+
+        //        card.lblSoloRank.Text = p.SoloRank ?? "未知";
+        //        card.lblFlexRank.Text = p.FlexRank ?? "未知";
+        //        card.lblPrivacyStatus.Text = p.IsPublic ?? "隐藏";
+
+        //        if (p.Avatar != null)
+        //            card.picHero.Image = p.Avatar;
+
+        //        // 【重要修复】战绩列表 + 英雄头像
+        //        if (matchInfo.MatchItems?.Count > 0)
+        //        {
+        //            card.ListViewControl.Items.Clear();
+        //            foreach (var item in matchInfo.MatchItems)
+        //                card.ListViewControl.Items.Add(item);
+
+        //            if (matchInfo.HeroIcons != null)
+        //                card.ListViewControl.SmallImageList = matchInfo.HeroIcons;
+        //        }
+
+        //        if (p.NameColor != default)
+        //        {
+        //            card.lblPlayerName.LinkColor = p.NameColor;
+        //            card.lblPlayerName.VisitedLinkColor = p.NameColor;
+        //            card.lblPlayerName.ActiveLinkColor = p.NameColor;
+        //        }
+        //        card.CurrentPuuId = matchInfo.Player.Puuid ?? "";
+        //    });
+        //}
+
         public void UpdateCardUI(PlayerCardControl card, PlayerMatchInfo matchInfo)
         {
             if (card == null || card.IsDisposed || matchInfo?.Player == null) return;
 
-            // 此为异步
-            //FormUiStateManager.SafeInvoke(card, () =>
-
-            // 此为同步
             FormUiStateManager.SafeInvokeSync(card, () =>
             {
+                if (card.IsDisposed) return;
+
                 var p = matchInfo.Player;
                 card.lblPlayerName.Text = p.GameName ?? "未知玩家";
 
-                // 更新完整名称
                 string full = !string.IsNullOrEmpty(p.FullName) ? p.FullName : (p.GameName ?? "");
                 card.SetFullPlayerName(full);
 
@@ -161,16 +215,39 @@ namespace League.Managers
                 if (p.Avatar != null)
                     card.picHero.Image = p.Avatar;
 
-                // 【重要修复】战绩列表 + 英雄头像
-                if (matchInfo.MatchItems?.Count > 0)
-                {
-                    card.ListViewControl.Items.Clear();
-                    foreach (var item in matchInfo.MatchItems)
-                        card.ListViewControl.Items.Add(item);
+                card.CurrentSummonerId = p.SummonerId;
+                card.CurrentChampionId = p.ChampionId;
+                card.CurrentPuuId = p.Puuid ?? "";
 
+                var lv = card.ListViewControl;
+                lv.BeginUpdate();
+                try
+                {
+                    // ★ 必须先绑定 ImageList，再添加带 ImageIndex 的项
                     if (matchInfo.HeroIcons != null)
-                        card.ListViewControl.SmallImageList = matchInfo.HeroIcons;
+                    {
+                        lv.SmallImageList = matchInfo.HeroIcons;
+                    }
+
+                    lv.Items.Clear();
+
+                    if (matchInfo.MatchItems != null && matchInfo.MatchItems.Count > 0)
+                    {
+                        foreach (var item in matchInfo.MatchItems)
+                        {
+                            // 与 SetPlayerInfo 一致：克隆，避免同一 ListViewItem 被多个控件占用
+                            lv.Items.Add((ListViewItem)item.Clone());
+                        }
+                    }
+
+                    lv.View = View.Details;
                 }
+                finally
+                {
+                    lv.EndUpdate();
+                }
+
+                lv.Refresh();
 
                 if (p.NameColor != default)
                 {
@@ -178,7 +255,6 @@ namespace League.Managers
                     card.lblPlayerName.VisitedLinkColor = p.NameColor;
                     card.lblPlayerName.ActiveLinkColor = p.NameColor;
                 }
-                card.CurrentPuuId = matchInfo.Player.Puuid ?? "";
             });
         }
 
