@@ -260,6 +260,41 @@ namespace League
         }
 
         /// <summary>
+        /// 等待召唤师信息 + SGP 均就绪（登录后 token/session 可能延迟几百 ms～数秒）
+        /// </summary>
+        private async Task<bool> WaitForSessionAndSgpReadyAsync(int maxAttempts = 20, int delayMs = 800)
+        {
+            for (int i = 1; i <= maxAttempts; i++)
+            {
+                try
+                {
+                    var summoner = await Globals.lcuClient.GetCurrentSummoner();
+                    bool summonerOk = summoner != null
+                        && !string.IsNullOrEmpty(summoner["puuid"]?.ToString());
+
+                    bool sgpOk = false;
+                    if (summonerOk)
+                    {
+                        sgpOk = await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client);
+                    }
+
+                    Debug.WriteLine($"[就绪检查] 第 {i}/{maxAttempts} 次 → summoner={summonerOk}, sgp={sgpOk}");
+
+                    if (summonerOk && sgpOk)
+                        return true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[就绪检查] 异常: {ex.Message}");
+                }
+
+                await Task.Delay(delayMs);
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// LcuManager 连接成功回调
         /// </summary>
         private async void OnLcuConnected()
@@ -311,12 +346,84 @@ namespace League
             // LcuManager 内部已经有自动重连循环，会自己重连
         }
 
+        ///// <summary>
+        ///// LCU 连接成功后的初始化（基本保持原逻辑）
+        ///// </summary>
+        //private async Task InitializeAfterLcuConnected()
+        //{
+        //    // 加载资源
+        //    Globals.resLoading.loadingResource(Globals.lcuClient);
+
+        //    if (_championManager != null)
+        //    {
+        //        try
+        //        {
+        //            Debug.WriteLine("[英雄预加载] 开始加载所有英雄数据...");
+        //            await _championManager.InitializeAsync(forceRefresh: false);
+        //            Debug.WriteLine($"[英雄预加载] 成功！共加载 {_championManager.AllChampions.Count} 个英雄");
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            Debug.WriteLine($"[英雄预加载] 失败: {ex.Message}");
+        //        }
+        //    }
+
+        //    // 延迟创建 ChatMessageBuilder
+        //    if (_chatMessageBuilder == null && _championManager != null)
+        //    {
+        //        _chatMessageBuilder = new ChatMessageBuilder(
+        //            _playerCardManager.GetAllCachedPlayerInfos,
+        //            _championManager!,
+        //            _appConfig?.HideSelfWhenSending ?? false
+        //        );
+        //        _chatSender?.SetChatMessageBuilder(_chatMessageBuilder);
+        //        Debug.WriteLine("[ChatMessageBuilder] 已成功延迟创建并注入 ChampionManager");
+        //    }
+
+        //    // 初始化 SGP
+        //    if (await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client))
+        //    {
+        //        Debug.WriteLine("SGP 连接初始化成功！");
+        //    }
+        //    else
+        //    {
+        //        Debug.WriteLine("SGP 连接初始化失败！");
+        //    }
+
+        //    // 初始化战绩 Tab
+        //    InitializeMatchTabContent();
+
+        //    // 初始化默认 Tab 和预热
+        //    await this.InvokeIfRequiredAsync(async () =>
+        //    {
+        //        RefreshState.ForceMatchRefresh = false;
+        //        await InitializeDefaultTab();
+        //        _configUpdateManager!.PreWarmUiComponents();
+
+        //        // 主动查一次当前 phase（LcuManager 连接后也会查，这里再补一次更保险）
+        //        string? currentPhase = await Globals.lcuClient.GetGameflowPhase();
+        //        if (!string.IsNullOrEmpty(currentPhase))
+        //            await _gameFlowWatcher!.OnGameflowPhaseChanged(currentPhase, null);
+
+        //        _gameFlowWatcher!.StartGameflowWatcher();
+
+        //        // 必须在 phase 处理之后：InProgress 会把 IsGame 设为 true
+        //        _uiManager!.SetLcuUiState(_uiManager.LcuReady, _uiManager.IsGame);
+
+        //        // 已在游戏中则直接切到卡片 Tab
+        //        if (_uiManager.IsGame && imageTabControl1.TabPages.Count > 1)
+        //            imageTabControl1.SelectedIndex = 1;
+        //    });
+
+        //    _uiManager!.SetLcuUiState(_uiManager!.LcuReady, _uiManager!.IsGame);
+        //}
+
         /// <summary>
-        /// LCU 连接成功后的初始化（基本保持原逻辑）
+        /// LCU 连接成功后的初始化（带会话就绪等待，避免首屏战绩空白）
         /// </summary>
         private async Task InitializeAfterLcuConnected()
         {
-            // 加载资源
+            // 加载资源（不依赖登录完成）
             Globals.resLoading.loadingResource(Globals.lcuClient);
 
             if (_championManager != null)
@@ -345,14 +452,18 @@ namespace League
                 Debug.WriteLine("[ChatMessageBuilder] 已成功延迟创建并注入 ChampionManager");
             }
 
-            // 初始化 SGP
-            if (await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client))
+            // ★ 关键：等召唤师 + SGP 都就绪再加载战绩
+            Debug.WriteLine("[LCU] 等待会话与 SGP 就绪...");
+            bool ready = await WaitForSessionAndSgpReadyAsync(maxAttempts: 20, delayMs: 800);
+            if (!ready)
             {
-                Debug.WriteLine("SGP 连接初始化成功！");
+                Debug.WriteLine("[LCU] 会话/SGP 等待超时，仍尝试初始化（可能空白，可后续强制刷新）");
+                // 再试一次 SGP，不阻塞后续 phase 监听
+                _ = await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client);
             }
             else
             {
-                Debug.WriteLine("SGP 连接初始化失败！");
+                Debug.WriteLine("SGP 连接初始化成功！");
             }
 
             // 初始化战绩 Tab
@@ -361,21 +472,18 @@ namespace League
             // 初始化默认 Tab 和预热
             await this.InvokeIfRequiredAsync(async () =>
             {
-                RefreshState.ForceMatchRefresh = false;
+                RefreshState.ForceMatchRefresh = true; // 首次加载走网络，避免脏缓存
                 await InitializeDefaultTab();
                 _configUpdateManager!.PreWarmUiComponents();
 
-                // 主动查一次当前 phase（LcuManager 连接后也会查，这里再补一次更保险）
                 string? currentPhase = await Globals.lcuClient.GetGameflowPhase();
                 if (!string.IsNullOrEmpty(currentPhase))
                     await _gameFlowWatcher!.OnGameflowPhaseChanged(currentPhase, null);
 
                 _gameFlowWatcher!.StartGameflowWatcher();
 
-                // 必须在 phase 处理之后：InProgress 会把 IsGame 设为 true
                 _uiManager!.SetLcuUiState(_uiManager.LcuReady, _uiManager.IsGame);
 
-                // 已在游戏中则直接切到卡片 Tab
                 if (_uiManager.IsGame && imageTabControl1.TabPages.Count > 1)
                     imageTabControl1.SelectedIndex = 1;
             });
@@ -405,31 +513,30 @@ namespace League
             Debug.WriteLine($"[InitializeDefaultTab] 开始，ForceMatchRefresh={RefreshState.ForceMatchRefresh}");
 
             var summoner = await Globals.lcuClient.GetCurrentSummoner();
-            if (summoner == null)
+            string? puuid = summoner?["puuid"]?.ToString();
+            if (summoner == null || string.IsNullOrEmpty(puuid))
             {
-                Debug.WriteLine("[InitializeDefaultTab] 获取当前召唤师失败");
+                Debug.WriteLine("[InitializeDefaultTab] 获取当前召唤师失败或无 puuid，跳过");
                 return;
             }
 
-            Globals.CurrentPuuid = summoner["puuid"]?.ToString() ?? "";
+            Globals.CurrentPuuid = puuid;
             Globals.CurrentSummonerName = summoner["gameName"]?.ToString();
 
-            // 把自己的PUUID告诉消息构建器，用来过滤自己
             _chatMessageBuilder?.SetMyPuuid(Globals.CurrentPuuid);
 
             Debug.WriteLine($"[InitializeDefaultTab] 当前玩家 PUUID: {Globals.CurrentPuuid}");
 
-            var rankedStats = await GetRankedStatsAsync(summoner["puuid"]?.ToString() ?? "");
+            var rankedStats = await GetRankedStatsAsync(puuid);
             string privacyStatus = GetPrivacyStatus(summoner);
 
-            // 记录调用 CreateNewTab 前的状态
             Debug.WriteLine($"[InitializeDefaultTab] 调用 CreateNewTab，ForceMatchRefresh={RefreshState.ForceMatchRefresh}");
 
             _matchTabContent?.CreateNewTab(
                 summoner["summonerId"]?.ToString() ?? "",
                 summoner["gameName"]?.ToString() ?? "",
                 summoner["tagLine"]?.ToString() ?? "",
-                summoner["puuid"]?.ToString() ?? "",
+                puuid,
                 summoner["profileIconId"]?.ToString() ?? "",
                 summoner["summonerLevel"]?.ToString() ?? "",
                 privacyStatus,
@@ -438,6 +545,44 @@ namespace League
 
             Debug.WriteLine("[InitializeDefaultTab] 完成");
         }
+        //public async Task InitializeDefaultTab()
+        //{
+        //    Debug.WriteLine($"[InitializeDefaultTab] 开始，ForceMatchRefresh={RefreshState.ForceMatchRefresh}");
+
+        //    var summoner = await Globals.lcuClient.GetCurrentSummoner();
+        //    if (summoner == null)
+        //    {
+        //        Debug.WriteLine("[InitializeDefaultTab] 获取当前召唤师失败");
+        //        return;
+        //    }
+
+        //    Globals.CurrentPuuid = summoner["puuid"]?.ToString() ?? "";
+        //    Globals.CurrentSummonerName = summoner["gameName"]?.ToString();
+
+        //    // 把自己的PUUID告诉消息构建器，用来过滤自己
+        //    _chatMessageBuilder?.SetMyPuuid(Globals.CurrentPuuid);
+
+        //    Debug.WriteLine($"[InitializeDefaultTab] 当前玩家 PUUID: {Globals.CurrentPuuid}");
+
+        //    var rankedStats = await GetRankedStatsAsync(summoner["puuid"]?.ToString() ?? "");
+        //    string privacyStatus = GetPrivacyStatus(summoner);
+
+        //    // 记录调用 CreateNewTab 前的状态
+        //    Debug.WriteLine($"[InitializeDefaultTab] 调用 CreateNewTab，ForceMatchRefresh={RefreshState.ForceMatchRefresh}");
+
+        //    _matchTabContent?.CreateNewTab(
+        //        summoner["summonerId"]?.ToString() ?? "",
+        //        summoner["gameName"]?.ToString() ?? "",
+        //        summoner["tagLine"]?.ToString() ?? "",
+        //        summoner["puuid"]?.ToString() ?? "",
+        //        summoner["profileIconId"]?.ToString() ?? "",
+        //        summoner["summonerLevel"]?.ToString() ?? "",
+        //        privacyStatus,
+        //        rankedStats
+        //    );
+
+        //    Debug.WriteLine("[InitializeDefaultTab] 完成");
+        //}
 
         private async void btn_search_Click(object sender, EventArgs e)
         {
@@ -551,19 +696,27 @@ namespace League
         {
             bool refreshFlag = forceRefresh ?? RefreshState.ForceMatchRefresh;
 
-            if (refreshFlag)
-                //Debug.WriteLine("⚡ 强制刷新已启用");
+            //if (refreshFlag)
+            //    //Debug.WriteLine("⚡ 强制刷新已启用");
 
-                // 1️⃣ 尝试从缓存读取
-                if (!refreshFlag)
-                {
-                    var cached = MatchCache.Get(puuid, queueId, begIndex, pageSize);
-                    if (cached != null)
-                    {
-                        //Debug.WriteLine($"从缓存读取: {puuid} [{queueId ?? "all"}] 起点{begIndex} 每页{pageSize}");
-                        return cached;
-                    }
-                }
+            //    // 1️⃣ 尝试从缓存读取
+            //    if (!refreshFlag)
+            //    {
+            //        var cached = MatchCache.Get(puuid, queueId, begIndex, pageSize);
+            //        if (cached != null)
+            //        {
+            //            //Debug.WriteLine($"从缓存读取: {puuid} [{queueId ?? "all"}] 起点{begIndex} 每页{pageSize}");
+            //            return cached;
+            //        }
+            //    }
+
+            // 非强制刷新时优先读缓存
+            if (!refreshFlag)
+            {
+                var cached = MatchCache.Get(puuid, queueId, begIndex, pageSize);
+                if (cached != null)
+                    return cached;
+            }
 
             // 2️⃣ 发起网络请求
             var allGames = await Globals.sgpClient.SgpFetchLatestMatches(puuid, begIndex, pageSize, queueId);

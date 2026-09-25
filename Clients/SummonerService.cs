@@ -102,21 +102,32 @@ namespace League.Clients
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    Debug.WriteLine($"[LCU] current-summoner 状态码: {response.StatusCode}");
                     return null;
                 }
 
                 var content = await response.Content.ReadAsStringAsync();
-                return JObject.Parse(content);
+                if (string.IsNullOrWhiteSpace(content))
+                    return null;
+
+                var obj = JObject.Parse(content);
+                // 必须有 puuid 才算真正登录完成
+                if (string.IsNullOrEmpty(obj["puuid"]?.ToString()))
+                {
+                    Debug.WriteLine("[LCU] current-summoner 无 puuid，视为未就绪");
+                    return null;
+                }
+                return obj;
             }
             catch (TaskCanceledException ex)
             {
                 Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
-                return new JObject();
+                return null;   // 不要 new JObject()
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"获取当前召唤师失败: {ex}");
-                return new JObject();
+                return null;   // 不要 new JObject()
             }
         }
 
