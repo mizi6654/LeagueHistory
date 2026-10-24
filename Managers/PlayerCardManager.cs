@@ -3,6 +3,7 @@ using League.Models;
 using League.Networking;
 using League.Parsers;
 using League.UIState;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using static League.FormMain;
@@ -24,6 +25,12 @@ namespace League.Managers
         private DateTime _lastFillEnemyTeamTime = DateTime.MinValue;
         private const int FillThrottleMs = 1200;
 
+        // 隐藏会话日志（进程内每种只存一次；新一局 Reset）
+        private static readonly object HiddenLogLock = new object();
+        private static bool _hiddenLogMyTeamSaved;
+        private static bool _hiddenLogEnemyTeamSaved;
+        private static bool _hiddenLogFull10Saved;
+
         public SemaphoreSlim UiLock => _uiManager._uiLock;
 
         public PlayerCardManager(FormMain form, MatchQueryProcessor matchQueryProcessor)
@@ -37,6 +44,126 @@ namespace League.Managers
             _validator = new PlayerCardValidator(form);
 
             matchQueryProcessor.SetPlayerCardManager(this);
+        }
+
+        public void ResetHiddenSessionLogFlags()
+        {
+            lock (HiddenLogLock)
+            {
+                _hiddenLogMyTeamSaved = false;
+                _hiddenLogEnemyTeamSaved = false;
+                _hiddenLogFull10Saved = false;
+            }
+        }
+
+        /// <summary>
+        /// 在完整 session JSON 里判断是否存在隐藏玩家（champ-select / gameflow 结构都兼容）
+        /// </summary>
+        public static bool SessionHasHiddenPlayer(JToken session)
+        {
+            if (session == null) return false;
+
+            // champ-select
+            if (TeamArrayHasHiddenPlayer(session["myTeam"] as JArray)) return true;
+            if (TeamArrayHasHiddenPlayer(session["theirTeam"] as JArray)) return true;
+
+            // gameflow
+            var gameData = session["gameData"];
+            if (gameData != null)
+            {
+                if (TeamArrayHasHiddenPlayer(gameData["teamOne"] as JArray)) return true;
+                if (TeamArrayHasHiddenPlayer(gameData["teamTwo"] as JArray)) return true;
+            }
+
+            // 有人直接传队伍数组时也兼容
+            if (session is JArray arr && TeamArrayHasHiddenPlayer(arr)) return true;
+
+            return false;
+        }
+
+        private static bool TeamArrayHasHiddenPlayer(JArray team)
+        {
+            if (team == null || team.Count == 0) return false;
+            foreach (var p in team)
+            {
+                if (p == null) continue;
+                string vis = p["nameVisibilityType"]?.ToString() ?? "";
+                string puuid = p["puuid"]?.ToString() ?? "";
+                long sid = p["summonerId"]?.Value<long>() ?? 0;
+
+                if (string.Equals(vis, "HIDDEN", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (!MatchQueryProcessor.IsUsablePuuid(puuid) && sid == 0)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// side:
+        ///   "my_team"         — 选人 ChampSelect 完整 session，仅当我方有隐藏时存
+        ///   "full10_gameflow" — 读秒 GameSession 完整 session，本局任意侧有隐藏时存
+        /// 每种 side 全局只存一次（带锁）
+        /// </summary>
+        public void TrySaveHiddenFullSessionOnce(string side, JToken fullSession)
+        {
+            if (fullSession == null) return;
+
+            lock (HiddenLogLock)
+            {
+                if (side == "my_team")
+                {
+                    if (_hiddenLogMyTeamSaved) return;
+
+                    // 只看我方 myTeam 是否有隐藏（不要用 theirTeam 误触发）
+                    var myTeam = fullSession["myTeam"] as JArray;
+                    if (!TeamArrayHasHiddenPlayer(myTeam))
+                        return;
+
+                    WriteHiddenSessionFile("my_team", fullSession);
+                    _hiddenLogMyTeamSaved = true;
+                    return;
+                }
+
+                if (side == "full10_gameflow")
+                {
+                    if (_hiddenLogFull10Saved) return;
+
+                    // 读秒完整包：当前 session 任一侧有隐藏，或本局已为「我方隐藏」存过
+                    bool hasHiddenNow = SessionHasHiddenPlayer(fullSession);
+                    if (!hasHiddenNow && !_hiddenLogMyTeamSaved)
+                        return;
+
+                    WriteHiddenSessionFile("full10_gameflow", fullSession);
+                    _hiddenLogFull10Saved = true;
+                    return;
+                }
+            }
+        }
+
+        private static void WriteHiddenSessionFile(string side, JToken fullSession)
+        {
+            try
+            {
+                string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log");
+                Directory.CreateDirectory(logDir);
+
+                string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string fileName = side switch
+                {
+                    "my_team" => $"hidden_my_team_{stamp}.json",
+                    "full10_gameflow" => $"hidden_full10_gameflow_{stamp}.json",
+                    _ => $"hidden_{side}_{stamp}.json"
+                };
+
+                string path = Path.Combine(logDir, fileName);
+                File.WriteAllText(path, fullSession.ToString(Formatting.Indented));
+                Debug.WriteLine($"[HiddenLog] 已保存 {side} → {path}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HiddenLog] 保存失败: {ex.Message}");
+            }
         }
 
         public PlayerMatchInfo CreateFailedPlayerInfo(long summonerId, int championId)

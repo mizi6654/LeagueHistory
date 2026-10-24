@@ -117,6 +117,7 @@ namespace League.Services
                         break;
 
                     case "ChampSelect":
+                        _cardManager.ResetHiddenSessionLogFlags();
                         await HandleChampSelectStart();
                         break;
 

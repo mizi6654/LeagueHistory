@@ -20,6 +20,9 @@ namespace League
             Trace.AutoFlush = true;
             Trace.WriteLine("[Program] 软件启动");
 
+            // 启动时加载 SGP 区服表（国服+外服）
+            League.Clients.SgpServerConfig.Load();
+
             Application.Run(new FormMain());
         }
     }

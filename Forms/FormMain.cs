@@ -321,7 +321,8 @@ namespace League
                     bool sgpOk = false;
                     if (summonerOk)
                     {
-                        sgpOk = await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client);
+                        //sgpOk = await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client);
+                        sgpOk = await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client,LcuManager.Instance.SgpServerId);
                     }
 
                     //Debug.WriteLine($"[就绪检查] 第 {i}/{maxAttempts} 次 → summoner={summonerOk}, sgp={sgpOk}");
@@ -449,7 +450,8 @@ namespace League
             {
                 Debug.WriteLine("[LCU] 会话/SGP 等待超时，仍尝试初始化（可能空白，可后续强制刷新）");
                 // 再试一次 SGP，不阻塞后续 phase 监听
-                _ = await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client);
+                //_ = await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client);
+                _ = await Globals.sgpClient.InitSgpAsync(Globals.lcuClient.Client,LcuManager.Instance.SgpServerId);
             }
             else
             {
@@ -668,6 +670,12 @@ namespace League
 
             // 发起网络请求
             var allGames = await Globals.sgpClient.SgpFetchLatestMatches(puuid, begIndex, pageSize, queueId);
+
+            if (allGames==null || allGames.Count >= 0)
+            {
+                Debug.WriteLine("***SGP查询端口失败，启用LCU端口查询***");
+                allGames = await Globals.lcuClient.FetchLatestMatches(puuid);
+            }
 
             // 写入缓存,null 表示失败，不要写入缓存；空数组可以写入（表示“这页确实没数据”）
             MatchCache.Add(puuid, queueId, begIndex, pageSize, allGames);

@@ -65,11 +65,15 @@ namespace League.Clients
         private static readonly TimeSpan SoftReconnectMax = TimeSpan.FromSeconds(15);
 
         private readonly string _cacheFilePath;
-        private const int CacheValidMinutes = 180;         // 进游戏关客户端时缓存要能撑住
+        private const int CacheValidMinutes = 3600;         // 进游戏关客户端时缓存要能撑住
 
         // 心跳用的轻量接口（国服可用；建连/心跳都用，避免 current-summoner 误判）
         private const string HeartbeatPath = "/riotclient/auth-token";
         private const string HeartbeatFallbackPath = "/riotclient/app-name";
+
+        public string Region { get; private set; }
+        public string RsoPlatformId { get; private set; }
+        public string SgpServerId { get; private set; }
 
         public LcuManager()
         {
@@ -237,47 +241,6 @@ namespace League.Clients
         }
 
         // ==================== 凭证（国服：命令行 + 缓存，无 lockfile）====================
-        //private Task<bool> TryGetCredentialsAsync()
-        //{
-        //    try
-        //    {
-        //        var ux = Process.GetProcessesByName("LeagueClientUx").FirstOrDefault();
-        //        if (ux != null)
-        //        {
-        //            string cmd = GetCommandLine(ux);
-        //            if (!string.IsNullOrEmpty(cmd))
-        //            {
-        //                string port = Clean(ExtractArgument(cmd, "--app-port="));
-        //                string token = Clean(ExtractArgument(cmd, "--remoting-auth-token="));
-        //                if (!string.IsNullOrEmpty(port) && !string.IsNullOrEmpty(token))
-        //                {
-        //                    _port = port;
-        //                    _token = token;
-        //                    SaveCache(_port, _token);
-        //                    Debug.WriteLine($"[LcuManager] 凭证←Ux Port={_port}");
-        //                    return Task.FromResult(true);
-        //                }
-        //            }
-        //        }
-
-        //        // UX 不在（含进游戏关客户端）：用缓存继续尝试 LCU
-        //        if (LoadCache(out string cp, out string ct))
-        //        {
-        //            _port = cp;
-        //            _token = ct;
-        //            Debug.WriteLine($"[LcuManager] 凭证←缓存 Port={_port}");
-        //            return Task.FromResult(true);
-        //        }
-
-        //        return Task.FromResult(false);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Debug.WriteLine($"[LcuManager] 取凭证异常: {ex.Message}");
-        //        return Task.FromResult(false);
-        //    }
-        //}
-
         private Task<bool> TryGetCredentialsAsync()
         {
             try
@@ -290,22 +253,34 @@ namespace League.Clients
                     {
                         string port = Clean(ExtractArgument(cmd, "--app-port="));
                         string token = Clean(ExtractArgument(cmd, "--remoting-auth-token="));
+
+                        // 新增区服
+                        string region = Clean(ExtractArgument(cmd, "--region="));
+                        string rso = Clean(ExtractArgument(cmd, "--rso-platform-id="));
+                        if (string.IsNullOrEmpty(rso))
+                            rso = Clean(ExtractArgument(cmd, "--platform-id="));
+
                         if (!string.IsNullOrEmpty(port) && !string.IsNullOrEmpty(token))
                         {
                             _port = port;
                             _token = token;
-                            // 不再在这里写缓存，等真正 Connected 再写
-                            Debug.WriteLine($"[LcuManager] 凭证←Ux Port={_port}，Token={_token}");
+
+                            if (!string.IsNullOrEmpty(region)) Region = region;
+                            if (!string.IsNullOrEmpty(rso)) RsoPlatformId = rso;
+                            SgpServerId = SgpServerConfig.BuildSgpServerId(Region, RsoPlatformId);
+
+                            Debug.WriteLine(
+                                $"[LcuManager] 凭证←Ux Port={_port}, Region={Region}, Rso={RsoPlatformId}, SgpId={SgpServerId}");
                             return Task.FromResult(true);
                         }
                     }
                 }
 
-                // UX 不在（含进游戏关客户端）：用缓存继续尝试 LCU
                 if (LoadCache(out string cp, out string ct))
                 {
                     _port = cp;
                     _token = ct;
+                    // 缓存里若以后存了 region 可一并恢复；现在至少 port/token 能连
                     Debug.WriteLine($"[LcuManager] 凭证←缓存 Port={_port}");
                     return Task.FromResult(true);
                 }

@@ -197,6 +197,9 @@ namespace League.Services
             var myTeam = session["myTeam"] as JArray;
             if (myTeam == null || myTeam.Count == 0) return;
 
+            // 仅当我方 myTeam 有隐藏 → 存完整 champ-select session（一次）
+            _cardManager.TrySaveHiddenFullSessionOnce("my_team", session);
+
             int row = myTeam[0]?["team"]?.Value<int>() == 1 ? 0 : 1;
 
             var structureSnapshot = string.Join("|", myTeam.Select(p =>
@@ -254,6 +257,10 @@ namespace League.Services
                     Debug.WriteLine("[ShowEnemyTeamCards] GameSession 多次重试仍为空，放弃本次");
                     return;
                 }
+
+                // ★ 完整 gameflow session（读秒/加载时通常含 teamOne+teamTwo）
+                // 我方曾有隐藏 或 当前 10 人里任一侧有隐藏 → 存完整 gameflow（一次）
+                _cardManager.TrySaveHiddenFullSessionOnce("full10_gameflow", sessionData);
 
                 int queueId = sessionData["gameData"]?["queue"]?["id"]?.Value<int>() ?? 0;
                 Globals.CurrGameMod = queueId.ToString();
