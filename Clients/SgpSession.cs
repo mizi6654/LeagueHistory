@@ -94,7 +94,50 @@ namespace League.Clients
             return !string.IsNullOrEmpty(_accessToken);
         }
 
+        /// <summary>
+        /// 国服客户端在平台配置里给出战绩服务地址（PlayerPreferences.ServiceEndpoint）；Riot 运营的服务器（日服、韩服、美服等）
+        /// 这一项却是偏好设置服务，战绩请求一律 403。那里的战绩在客户端设置的 player_platform_edge 上（日服为
+        /// apne1-red.pp.sgp.pvp.net），客户端自己登录也用这个地址；取不到时才退回原配置。
+        /// </summary>
         public async Task<string> LoadSgpEndpointAsync()
+        {
+            string configured = await LoadConfiguredEndpointAsync();
+            if (IsTencentHost(configured))
+            {
+                return configured;
+            }
+
+            string chosen = await LoadPlatformEdgeAsync() ?? configured;
+            Debug.WriteLine($"[SGP] 战绩服务地址: {chosen}");
+            return chosen;
+        }
+
+        private static bool IsTencentHost(string url) =>
+            Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && uri.Host.EndsWith(".lol.qq.com", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>客户端设置里的 player_platform_edge 地址；没有时为 null。</summary>
+        private async Task<string> LoadPlatformEdgeAsync()
+        {
+            try
+            {
+                using HttpResponseMessage resp = await _lcuClient.GetAsync(
+                    "lol-client-config/v3/client-config/lol.client_settings");
+                if (!resp.IsSuccessStatusCode) return null;
+
+                JObject settings = JObject.Parse(await resp.Content.ReadAsStringAsync());
+                string platformEdge = settings["player_platform_edge"]?["url"]?.ToString();
+                return string.IsNullOrEmpty(platformEdge) ? null : platformEdge.TrimEnd('/');
+            }
+            catch (Exception ex) when (ex is HttpRequestException or Newtonsoft.Json.JsonException)
+            {
+                // 退回原配置
+                Debug.WriteLine($"[SGP] 读取客户端平台地址失败: {ex.Message}");
+                return null;
+            }
+        }
+
+        private async Task<string> LoadConfiguredEndpointAsync()
         {
             try
             {
