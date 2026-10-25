@@ -10,9 +10,24 @@ namespace League.Parsers
     /// </summary>
     public class PlayerMatchDataFetcher
     {
+        /// <summary>
+        /// 根据玩家summonerId查询名称
+        /// </summary>
+        /// <param name="summonerId"></param>
+        /// <returns></returns>
         public async Task<JObject> GetGameNameBySummonerIdAsync(string summonerId)
         {
             return await Globals.lcuClient.GetGameNameBySummonerId(summonerId);
+        }
+
+        /// <summary>
+        /// 根据玩家Puuid查询名称
+        /// </summary>
+        /// <param name="puuid"></param>
+        /// <returns></returns>
+        public async Task<JObject> GetGameNameByPuuidAsync(string puuid)
+        {
+            return await Globals.lcuClient.GetGameNameByPuuid(puuid);
         }
 
         public async Task<Dictionary<string, RankedStats>> GetRankedStatsAsync(string puuid)

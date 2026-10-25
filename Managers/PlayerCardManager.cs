@@ -378,7 +378,7 @@ namespace League.Managers
                 if (retryCount > 0)
                     //Debug.WriteLine($"[Validate] 第 {retryCount} 次重试获取队伍数据...");
 
-                Debug.WriteLine("[Validate] 队伍数据不完整，尝试重新获取最新数据...");
+                //Debug.WriteLine("[Validate] 队伍数据不完整，尝试重新获取最新数据...");
                 (teamOne, teamTwo) = await TryGetLatestFullTeamsAsync();
 
                 if (teamOne != null && teamTwo != null && teamOne.Count == 5 && teamTwo.Count == 5)
@@ -390,7 +390,7 @@ namespace League.Managers
 
             if (teamOne == null || teamTwo == null || teamOne.Count != 5 || teamTwo.Count != 5)
             {
-                Debug.WriteLine("[Validate] 多次重试后仍无法得到有效队伍数据，补全中止");
+                //Debug.WriteLine("[Validate] 多次重试后仍无法得到有效队伍数据，补全中止");
                 return;
             }
 
@@ -409,11 +409,16 @@ namespace League.Managers
 
                 foreach (var cardInfo in cardsNeedFix)
                 {
-                    Debug.WriteLine($"[补全尝试] Col={cardInfo.Column} Name={cardInfo.CurrentName} SID={cardInfo.SummonerId} PUUID={cardInfo.Puuid ?? "空"}");
+                    Debug.WriteLine(
+                        $"[补全尝试] Col={cardInfo.Column} Name={cardInfo.CurrentName} " +
+                        $"SID={cardInfo.SummonerId} PUUID={cardInfo.Puuid ?? "空"} " +
+                        $"NameOnly={cardInfo.NameOnly}");
 
-                    if (cardInfo.SummonerId == 0 ||
-                        string.IsNullOrEmpty(cardInfo.Puuid) ||
-                        cardInfo.CurrentName?.Contains("隐藏") == true)
+                    // 真正隐藏：直接修 UI，不查
+                    bool noIdentity = cardInfo.SummonerId == 0 &&
+                        (string.IsNullOrEmpty(cardInfo.Puuid) || !MatchQueryProcessor.IsUsablePuuid(cardInfo.Puuid));
+
+                    if (noIdentity || cardInfo.CurrentName?.Contains("隐藏") == true && noIdentity)
                     {
                         _validator.FixHiddenPlayerCard(cardInfo.Card);
                         continue;
@@ -428,19 +433,52 @@ namespace League.Managers
                         continue;
                     }
 
-                    var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData, retryTimes: 3);
-
-                    if (matchInfo?.Player != null && matchInfo.MatchItems?.Count > 0)
+                    if (cardInfo.NameOnly)
                     {
-                        _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
-                        _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
-                        Debug.WriteLine($"[补全成功] {matchInfo.Player.GameName} 战绩项:{matchInfo.MatchItems.Count}");
+                        // ========== 只补名字 ==========
+                        bool nameOk = await TryFixPlayerNameOnlyAsync(cardInfo, playerData);
+                        if (!nameOk)
+                        {
+                            // 名字仍失败，降级为完整重查一次
+                            Debug.WriteLine($"[补全] 仅补名字失败，降级完整重查: {cardInfo.CurrentName}");
+                            var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData, retryTimes: 2);
+                            if (matchInfo?.Player != null)
+                            {
+                                _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
+                                if (matchInfo.Player.SummonerId != 0)
+                                    _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
+                                Debug.WriteLine($"[补全成功-降级] {matchInfo.Player.GameName}");
+                            }
+                            else
+                            {
+                                Debug.WriteLine($"[补全失败] 名字+战绩均未恢复: {cardInfo.CurrentName}");
+                            }
+                        }
                     }
                     else
                     {
-                        var failedInfo = _factory.CreateFailedPlayerInfo(cardInfo.SummonerId, cardInfo.ChampionId);
-                        _uiManager.UpdateCardUI(cardInfo.Card, failedInfo);
-                        Debug.WriteLine($"[补全失败] {cardInfo.CurrentName}");
+                        // ========== 完整补全（名字 + 战绩） ==========
+                        var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(playerData, retryTimes: 3);
+
+                        if (matchInfo?.Player != null &&
+                            (matchInfo.MatchItems?.Count > 0 ||
+                             !string.IsNullOrEmpty(matchInfo.Player.GameName) &&
+                             !matchInfo.Player.GameName.Contains("未知") &&
+                             !matchInfo.Player.GameName.Contains("失败")))
+                        {
+                            // 即使战绩为空（很久没打），只要名字正常也算成功
+                            _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
+                            if (matchInfo.Player.SummonerId != 0)
+                                _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
+                            Debug.WriteLine(
+                                $"[补全成功] {matchInfo.Player.GameName} 战绩项:{matchInfo.MatchItems?.Count ?? 0}");
+                        }
+                        else
+                        {
+                            var failedInfo = _factory.CreateFailedPlayerInfo(cardInfo.SummonerId, cardInfo.ChampionId);
+                            _uiManager.UpdateCardUI(cardInfo.Card, failedInfo);
+                            Debug.WriteLine($"[补全失败] {cardInfo.CurrentName}");
+                        }
                     }
 
                     await Task.Delay(250);
@@ -449,6 +487,358 @@ namespace League.Managers
             catch (Exception ex)
             {
                 Debug.WriteLine($"[ValidateAndCompleteAllCards] 整体异常: {ex.Message}");
+            }
+            finally
+            {
+                _uiManager._uiLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// 只刷新玩家显示名称（不重打 SGP 战绩）
+        /// </summary>
+        private async Task<bool> TryFixPlayerNameOnlyAsync(PlayerCardValidationInfo cardInfo, JToken playerData)
+        {
+            try
+            {
+                long sid = cardInfo.SummonerId;
+                if (sid == 0)
+                    sid = playerData["summonerId"]?.Value<long>() ?? 0;
+
+                string puuid = cardInfo.Puuid;
+                if (string.IsNullOrEmpty(puuid))
+                    puuid = playerData["puuid"]?.ToString() ?? "";
+
+                JObject summonerInfo = null;
+
+                if (sid != 0)
+                    summonerInfo = await Globals.lcuClient.GetGameNameBySummonerId(sid.ToString());
+                else if (MatchQueryProcessor.IsUsablePuuid(puuid))
+                    summonerInfo = await Globals.lcuClient.GetGameNameByPuuid(puuid);
+                else
+                    return false;
+
+                string gameName = summonerInfo?["gameName"]?.ToString();
+                string tagLine = summonerInfo?["tagLine"]?.ToString() ?? "";
+
+                if (string.IsNullOrWhiteSpace(gameName) ||
+                    gameName.Contains("未知") ||
+                    gameName == "未知玩家")
+                {
+                    Debug.WriteLine($"[仅补名字] 仍失败 SID={sid} PUUID={puuid?.Substring(0, Math.Min(8, puuid?.Length ?? 0))}...");
+                    return false;
+                }
+
+                string fullName = string.IsNullOrEmpty(tagLine) ? gameName : $"{gameName}#{tagLine}";
+
+                FormUiStateManager.SafeInvoke(cardInfo.Card, () =>
+                {
+                    cardInfo.Card.lblPlayerName.Text = fullName;
+                    string privacy = summonerInfo?["privacy"]?.ToString()
+                        ?.Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) == true
+                        ? "公开" : "隐藏";
+                    if (cardInfo.Card.lblPrivacyStatus != null)
+                        cardInfo.Card.lblPrivacyStatus.Text = privacy;
+                });
+
+                // 缓存同步（用现有 API）
+                long cacheKey = sid != 0 ? sid : (summonerInfo?["summonerId"]?.Value<long>() ?? 0);
+                if (cacheKey != 0)
+                {
+                    var all = _cache.GetAllCachedPlayerInfos();
+                    if (all.TryGetValue(cacheKey, out var cached) && cached?.Player != null)
+                    {
+                        cached.Player.GameName = gameName;
+                        cached.Player.FullName = fullName;
+                        _cache.AddOrUpdateCache(cacheKey, cached);
+                    }
+                }
+
+                Debug.WriteLine($"[仅补名字成功] {fullName}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[仅补名字异常] {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 进游戏后：用 GameSession 补全的真 puuid，刷新我方「隐藏/未知/空战绩」卡片。
+        /// myTeam / myRow 由调用方按当前红蓝方传入。
+        /// </summary>
+        public async Task CompleteMyTeamHiddenOrUnknownAsync(JArray myTeam, int myRow)
+        {
+            if (myTeam == null || myTeam.Count == 0)
+            {
+                Debug.WriteLine("[CompleteMyTeam] 我方队伍为空，跳过");
+                return;
+            }
+
+            try
+            {
+                var needFix = new List<PlayerCardValidationInfo>();
+
+                FormUiStateManager.SafeInvokeSync(_form.tableLayoutPanel1, () =>
+                {
+                    for (int col = 0; col < _form.tableLayoutPanel1.ColumnCount; col++)
+                    {
+                        var panel = _form.tableLayoutPanel1.GetControlFromPosition(col, myRow) as BorderPanel;
+                        if (panel == null || panel.Controls.Count == 0) continue;
+
+                        var card = panel.Controls[0] as PlayerCardControl;
+                        if (card == null || card.IsDisposed) continue;
+
+                        string name = card.lblPlayerName.Text?.Trim() ?? "";
+                        int listCount = card.ListViewControl?.Items.Count ?? 0;
+
+                        if (name.Contains("加载中") || name.Contains("查询中"))
+                            continue;
+
+                        bool isHiddenLike = name.Contains("隐藏");
+                        bool isUnknownOrFailed =
+                            name.Contains("未知") ||
+                            name == "未知玩家" ||
+                            name.Contains("失败") ||
+                            string.IsNullOrWhiteSpace(name);
+                        bool emptyMatches = listCount == 0;
+
+                        if (!isHiddenLike && !isUnknownOrFailed && !emptyMatches)
+                            continue;
+
+                        needFix.Add(new PlayerCardValidationInfo
+                        {
+                            SummonerId = card.CurrentSummonerId,
+                            ChampionId = card.CurrentChampionId,
+                            Puuid = card.CurrentPuuId ?? "",
+                            Row = myRow,
+                            Column = col,
+                            Card = card,
+                            CurrentName = name,
+                            NameOnly = !emptyMatches && (isUnknownOrFailed || isHiddenLike),
+                            RetryCount = 0
+                        });
+                    }
+                });
+
+                if (needFix.Count == 0)
+                {
+                    Debug.WriteLine("[CompleteMyTeam] 我方无需补全");
+                    return;
+                }
+
+                Debug.WriteLine($"[CompleteMyTeam] 发现 {needFix.Count} 张我方卡需要补全 | myRow={myRow}");
+
+                await _uiManager._uiLock.WaitAsync();
+                try
+                {
+                    foreach (var cardInfo in needFix)
+                    {
+                        JToken playerData = null;
+
+                        if (!string.IsNullOrEmpty(cardInfo.Puuid) &&
+                            MatchQueryProcessor.IsUsablePuuid(cardInfo.Puuid))
+                        {
+                            playerData = myTeam.FirstOrDefault(p =>
+                                p["puuid"]?.ToString() == cardInfo.Puuid);
+                        }
+
+                        if (playerData == null && cardInfo.ChampionId > 0)
+                        {
+                            playerData = myTeam.FirstOrDefault(p =>
+                                (p["championId"]?.Value<int>() ?? 0) == cardInfo.ChampionId);
+                        }
+
+                        if (playerData == null && cardInfo.SummonerId != 0)
+                        {
+                            playerData = myTeam.FirstOrDefault(p =>
+                                (p["summonerId"]?.Value<long>() ?? 0) == cardInfo.SummonerId);
+                        }
+
+                        if (playerData == null)
+                        {
+                            Debug.WriteLine(
+                                $"[CompleteMyTeam] 找不到玩家数据 Col={cardInfo.Column} " +
+                                $"Champ={cardInfo.ChampionId} Name={cardInfo.CurrentName}");
+                            continue;
+                        }
+
+                        string realPuuid = playerData["puuid"]?.ToString() ?? "";
+                        long realSid = playerData["summonerId"]?.Value<long>() ?? 0;
+
+                        if (!MatchQueryProcessor.IsUsablePuuid(realPuuid) && realSid == 0)
+                        {
+                            _validator.FixHiddenPlayerCard(cardInfo.Card);
+                            Debug.WriteLine($"[CompleteMyTeam] 仍无身份，保持隐藏 Col={cardInfo.Column}");
+                            continue;
+                        }
+
+                        Debug.WriteLine(
+                            $"[CompleteMyTeam] 补全 Col={cardInfo.Column} Name={cardInfo.CurrentName} " +
+                            $"SID={realSid} PUUID={(realPuuid.Length >= 8 ? realPuuid.Substring(0, 8) : realPuuid)}... " +
+                            $"NameOnly={cardInfo.NameOnly}");
+
+                        if (cardInfo.NameOnly)
+                        {
+                            bool ok = await TryFixPlayerNameOnlyAsync(cardInfo, playerData);
+                            if (!ok)
+                            {
+                                var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(
+                                    playerData, retryTimes: 2);
+                                if (matchInfo?.Player != null)
+                                {
+                                    _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
+                                    if (matchInfo.Player.SummonerId != 0)
+                                        _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
+                                    Debug.WriteLine($"[CompleteMyTeam] 降级完整成功 {matchInfo.Player.GameName}");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(
+                                playerData, retryTimes: 3);
+                            if (matchInfo?.Player != null)
+                            {
+                                _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
+                                if (matchInfo.Player.SummonerId != 0)
+                                    _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
+                                Debug.WriteLine(
+                                    $"[CompleteMyTeam] 完整成功 {matchInfo.Player.GameName} " +
+                                    $"战绩:{matchInfo.MatchItems?.Count ?? 0}");
+                            }
+                            else
+                            {
+                                Debug.WriteLine($"[CompleteMyTeam] 完整失败 Col={cardInfo.Column}");
+                            }
+                        }
+
+                        await Task.Delay(250);
+                    }
+                }
+                finally
+                {
+                    _uiManager._uiLock.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[CompleteMyTeam] 异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 串行补全某一行：空战绩 / 失败 / 未知 / 隐藏（有可用身份时）
+        /// 慢网下比并发 Fill 更稳，专门兜底超时空卡。
+        /// </summary>
+        public async Task CompleteTeamEmptyOrFailedAsync(JArray team, int row)
+        {
+            if (team == null || team.Count == 0) return;
+
+            var needFix = new List<PlayerCardValidationInfo>();
+
+            FormUiStateManager.SafeInvokeSync(_form.tableLayoutPanel1, () =>
+            {
+                for (int col = 0; col < _form.tableLayoutPanel1.ColumnCount; col++)
+                {
+                    var panel = _form.tableLayoutPanel1.GetControlFromPosition(col, row) as BorderPanel;
+                    if (panel == null || panel.Controls.Count == 0) continue;
+
+                    var card = panel.Controls[0] as PlayerCardControl;
+                    if (card == null || card.IsDisposed) continue;
+
+                    string name = card.lblPlayerName.Text?.Trim() ?? "";
+                    int listCount = card.ListViewControl?.Items.Count ?? 0;
+
+                    // 加载中也纳入：慢网时 Fill 失败后常卡在加载中
+                    bool isLoading = name.Contains("加载中") || name.Contains("查询中");
+                    bool isBadName =
+                        name.Contains("隐藏") ||
+                        name.Contains("未知") ||
+                        name.Contains("失败") ||
+                        string.IsNullOrWhiteSpace(name);
+                    bool emptyMatches = listCount == 0;
+
+                    // 只要战绩空，或名字异常，就补（有身份的前提下）
+                    if (!emptyMatches && !isBadName && !isLoading)
+                        continue;
+
+                    needFix.Add(new PlayerCardValidationInfo
+                    {
+                        SummonerId = card.CurrentSummonerId,
+                        ChampionId = card.CurrentChampionId,
+                        Puuid = card.CurrentPuuId ?? "",
+                        Row = row,
+                        Column = col,
+                        Card = card,
+                        CurrentName = name,
+                        NameOnly = !emptyMatches && isBadName, // 有战绩只补名
+                        RetryCount = 0
+                    });
+                }
+            });
+
+            if (needFix.Count == 0)
+            {
+                Debug.WriteLine($"[CompleteTeam] row={row} 无需补全");
+                return;
+            }
+
+            Debug.WriteLine($"[CompleteTeam] row={row} 发现 {needFix.Count} 张卡需要补全");
+
+            await _uiManager._uiLock.WaitAsync();
+            try
+            {
+                foreach (var cardInfo in needFix)
+                {
+                    JToken playerData = null;
+
+                    if (MatchQueryProcessor.IsUsablePuuid(cardInfo.Puuid))
+                        playerData = team.FirstOrDefault(p => p["puuid"]?.ToString() == cardInfo.Puuid);
+
+                    if (playerData == null && cardInfo.ChampionId > 0)
+                        playerData = team.FirstOrDefault(p =>
+                            (p["championId"]?.Value<int>() ?? 0) == cardInfo.ChampionId);
+
+                    if (playerData == null && cardInfo.SummonerId != 0)
+                        playerData = team.FirstOrDefault(p =>
+                            (p["summonerId"]?.Value<long>() ?? 0) == cardInfo.SummonerId);
+
+                    if (playerData == null)
+                    {
+                        Debug.WriteLine($"[CompleteTeam] 找不到数据 Col={cardInfo.Column}");
+                        continue;
+                    }
+
+                    string realPuuid = playerData["puuid"]?.ToString() ?? "";
+                    long realSid = playerData["summonerId"]?.Value<long>() ?? 0;
+
+                    if (!MatchQueryProcessor.IsUsablePuuid(realPuuid) && realSid == 0)
+                    {
+                        _validator.FixHiddenPlayerCard(cardInfo.Card);
+                        continue;
+                    }
+
+                    // 慢网：串行 + 多试几次
+                    var matchInfo = await _matchQueryProcessor.SafeFetchPlayerMatchInfoAsync(
+                        playerData, retryTimes: 4);
+
+                    if (matchInfo?.Player != null)
+                    {
+                        _uiManager.UpdateCardUI(cardInfo.Card, matchInfo);
+                        if (matchInfo.Player.SummonerId != 0)
+                            _cache.AddOrUpdateCache(matchInfo.Player.SummonerId, matchInfo);
+                        Debug.WriteLine(
+                            $"[CompleteTeam] 成功 {matchInfo.Player.GameName} 战绩:{matchInfo.MatchItems?.Count ?? 0}");
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"[CompleteTeam] 仍失败 Col={cardInfo.Column} Name={cardInfo.CurrentName}");
+                    }
+
+                    await Task.Delay(400); // 比 250 略长，减轻超时
+                }
             }
             finally
             {
@@ -470,7 +860,7 @@ namespace League.Managers
                     if (myTeam != null && myTeam.Count > 0)
                     {
                         _form._cachedMyTeam = myTeam;
-                        Debug.WriteLine($"[TryGetLatest] 我方从 ChampSelect 获取 ({myTeam.Count}人)");
+                        //Debug.WriteLine($"[TryGetLatest] 我方从 ChampSelect 获取 ({myTeam.Count}人)");
                     }
                 }
 
@@ -506,7 +896,7 @@ namespace League.Managers
                         _form._cachedMyTeam = myTeam;
                         _form._cachedEnemyTeam = enemyTeam;
 
-                        Debug.WriteLine($"[TryGetLatest] GameSession 补全成功 | 我方:{myTeam?.Count ?? 0} | 敌方:{enemyTeam?.Count ?? 0}");
+                        //Debug.WriteLine($"[TryGetLatest] GameSession 补全成功 | 我方:{myTeam?.Count ?? 0} | 敌方:{enemyTeam?.Count ?? 0}");
                     }
                 }
             }

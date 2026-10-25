@@ -59,7 +59,7 @@ namespace League.Clients
                                 _servers[prop.Name] = (mh, common ?? mh);
                         }
                     }
-                    Debug.WriteLine($"[SGP Config] {_servers.Count} 个服务器");
+                    Debug.WriteLine($"[SGP Config] 加载 {_servers.Count} 个服务器（含国内外）");
                 }
                 else
                 {

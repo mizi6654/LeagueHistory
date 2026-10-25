@@ -167,6 +167,11 @@ namespace League.Services
                 await Task.Delay(500);
                 await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
 
+                // 中途打开，补全我方
+                await _cardManager.CompleteMyTeamHiddenOrUnknownAsync(myTeam, myRow);
+                // 中途打开，补全敌方
+                await _cardManager.CompleteTeamEmptyOrFailedAsync(enemyTeam, enemyRow);
+
                 int enemyCards = _cardManager.CountCardsInRow(enemyRow);
                 if (enemyCards < Math.Min(5, enemyTeam.Count))
                 {
@@ -284,6 +289,8 @@ namespace League.Services
                 bool isInTeamOne = teamOne.Any(t => t["puuid"]?.ToString() == myPuuid);
                 JArray enemyTeam = isInTeamOne ? teamTwo : teamOne;
                 int enemyRow = isInTeamOne ? 1 : 0;
+                JArray myTeam = isInTeamOne ? teamOne : teamTwo;
+                int myRow = isInTeamOne ? 0 : 1;
 
                 if (enemyTeam == null || enemyTeam.Count == 0)
                 {
@@ -298,6 +305,10 @@ namespace League.Services
                 await Task.Delay(500);
                 await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
 
+                // 我方隐藏/未知
+                await _cardManager.CompleteMyTeamHiddenOrUnknownAsync(myTeam, myRow);
+
+                // 卡片数量不够才二次 Fill
                 int enemyCards = _cardManager.CountCardsInRow(enemyRow);
                 int expect = Math.Min(5, enemyTeam.Count);
                 if (enemyCards < expect)
@@ -307,8 +318,10 @@ namespace League.Services
                     await _cardManager.CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
                     await _cardManager.FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow, forceFill: true);
                     await Task.Delay(300);
-                    await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo);
                 }
+
+                // 无论数量够不够：名字正常但战绩空 → 串行补
+                await _cardManager.CompleteTeamEmptyOrFailedAsync(enemyTeam, enemyRow);
 
                 Debug.WriteLine($"[ShowEnemyTeamCards] 完成 | 敌方卡片数={_cardManager.CountCardsInRow(enemyRow)}");
             }

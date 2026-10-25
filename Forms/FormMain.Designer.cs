@@ -761,7 +761,7 @@ namespace League
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "联盟视界 League v1.1.3";
+            Text = "联盟视界 League v1.1.4";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
             imageTabControl1.ResumeLayout(false);

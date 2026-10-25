@@ -40,7 +40,6 @@ namespace League.Managers
                 {
                     for (int col = 0; col < _form.tableLayoutPanel1.ColumnCount; col++)
                     {
-                        // 【关键修复】加强 null 判断
                         var panel = _form.tableLayoutPanel1.GetControlFromPosition(col, row) as BorderPanel;
                         if (panel == null || panel.Controls.Count == 0)
                             continue;
@@ -54,13 +53,35 @@ namespace League.Managers
                         string flexRank = card.lblFlexRank?.Text?.Trim() ?? "";
                         int listCount = card.ListViewControl?.Items.Count ?? 0;
 
-                        bool isLoading = name.Contains("加载中") || name.Contains("查询中") || name == "未知";
-                        bool isFailed = name.Contains("失败") || soloRank.Contains("失败") || flexRank.Contains("失败");
-                        bool isHidden = name.Contains("隐藏") || card.CurrentSummonerId == 0;
+                        // 加载中 / 查询中：第一次查询还在跑，不进补全
+                        if (name.Contains("加载中") || name.Contains("查询中"))
+                            continue;
 
-                        bool needsFix = (listCount == 0 || isLoading || isFailed) && !isHidden;
+                        // 真正隐藏（无身份）：不进补全列表，后面单独 FixHidden
+                        bool isTrueHidden = name.Contains("隐藏") &&
+                            card.CurrentSummonerId == 0 &&
+                            string.IsNullOrEmpty(card.CurrentPuuId);
+                        if (isTrueHidden)
+                            continue;
 
-                        if (needsFix)
+                        bool isUnknownName =
+                            name.Contains("未知") ||
+                            name == "未知玩家" ||
+                            string.IsNullOrWhiteSpace(name);
+
+                        bool isFailedName =
+                            name.Contains("失败") ||
+                            soloRank.Contains("失败") ||
+                            flexRank.Contains("失败");
+
+                        // 显示成「隐藏」但其实有 SID/PUUID → 当完整补全处理
+                        bool isFakeHidden = name.Contains("隐藏") &&
+                            (card.CurrentSummonerId != 0 || !string.IsNullOrEmpty(card.CurrentPuuId));
+
+                        bool hasMatches = listCount > 0;
+
+                        // 1) 未知/失败 + 已有战绩 → 只补名字
+                        if ((isUnknownName || isFailedName) && hasMatches)
                         {
                             result.Add(new PlayerCardValidationInfo
                             {
@@ -73,7 +94,28 @@ namespace League.Managers
                                 CurrentName = name,
                                 CurrentSoloRank = soloRank,
                                 CurrentFlexRank = flexRank,
-                                RetryCount = 0
+                                RetryCount = 0,
+                                NameOnly = true
+                            });
+                            continue;
+                        }
+
+                        // 2) 未知/失败/假隐藏 + 无战绩 → 完整补全
+                        if ((isUnknownName || isFailedName || isFakeHidden) && !hasMatches)
+                        {
+                            result.Add(new PlayerCardValidationInfo
+                            {
+                                SummonerId = card.CurrentSummonerId,
+                                ChampionId = card.CurrentChampionId,
+                                Puuid = card.CurrentPuuId ?? "",
+                                Row = row,
+                                Column = col,
+                                Card = card,
+                                CurrentName = name,
+                                CurrentSoloRank = soloRank,
+                                CurrentFlexRank = flexRank,
+                                RetryCount = 0,
+                                NameOnly = false
                             });
                         }
                     }

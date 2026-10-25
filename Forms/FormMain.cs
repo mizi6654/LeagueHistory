@@ -538,7 +538,7 @@ namespace League
                 rankedStats
             );
 
-            Debug.WriteLine("[InitializeDefaultTab] 完成");
+            //Debug.WriteLine("[InitializeDefaultTab] 完成");
         }
         
 
@@ -670,12 +670,6 @@ namespace League
 
             // 发起网络请求
             var allGames = await Globals.sgpClient.SgpFetchLatestMatches(puuid, begIndex, pageSize, queueId);
-
-            if (allGames==null || allGames.Count >= 0)
-            {
-                Debug.WriteLine("***SGP查询端口失败，启用LCU端口查询***");
-                allGames = await Globals.lcuClient.FetchLatestMatches(puuid);
-            }
 
             // 写入缓存,null 表示失败，不要写入缓存；空数组可以写入（表示“这页确实没数据”）
             MatchCache.Add(puuid, queueId, begIndex, pageSize, allGames);

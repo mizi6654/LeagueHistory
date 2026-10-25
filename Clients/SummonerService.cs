@@ -49,46 +49,137 @@ namespace League.Clients
         /// <summary>
         /// 根据召唤师ID查询召唤师信息
         /// </summary>
-        public async Task<JObject> GetSummonerByIdAsync(string summonerId)
+        //public async Task<JObject> GetSummonerByIdAsync(string summonerId)
+        //{
+        //    if (string.IsNullOrEmpty(summonerId))
+        //    {
+        //        return null;
+        //    }
+
+        //    // 检查缓存
+        //    if (_summonerCache.TryGetValue(summonerId, out var cached))
+        //    {
+        //        return cached;
+        //    }
+
+        //    try
+        //    {
+        //        var response = await _client.GetAsync($"/lol-summoner/v1/summoners/{summonerId}");
+
+        //        if (!response.IsSuccessStatusCode)
+        //        {
+        //            return null;
+        //        }
+
+        //        var content = await response.Content.ReadAsStringAsync();
+        //        var summonerData = JObject.Parse(content);
+
+        //        // 更新缓存
+        //        _summonerCache[summonerId] = summonerData;
+
+        //        return summonerData;
+        //    }
+        //    catch (TaskCanceledException ex)
+        //    {
+        //        Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+        //        return null;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Debug.WriteLine($"根据ID查询召唤师异常: {ex}");
+        //        return null;
+        //    }
+        //}
+
+        /// <summary>
+        /// 根据召唤师ID查询召唤师信息（带轻量重试，适配不稳定网络）
+        /// </summary>
+        public async Task<JObject> GetSummonerByIdAsync(string summonerId, int maxRetry = 3)
         {
             if (string.IsNullOrEmpty(summonerId))
-            {
                 return null;
-            }
 
             // 检查缓存
             if (_summonerCache.TryGetValue(summonerId, out var cached))
-            {
                 return cached;
-            }
 
-            try
+            for (int attempt = 1; attempt <= maxRetry; attempt++)
             {
-                var response = await _client.GetAsync($"/lol-summoner/v1/summoners/{summonerId}");
-
-                if (!response.IsSuccessStatusCode)
+                try
                 {
-                    return null;
+                    var response = await _client.GetAsync($"/lol-summoner/v1/summoners/{summonerId}");
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var content = await response.Content.ReadAsStringAsync();
+                        if (!string.IsNullOrWhiteSpace(content))
+                        {
+                            var summonerData = JObject.Parse(content);
+                            // 必须有 gameName 才算有效
+                            if (!string.IsNullOrEmpty(summonerData["gameName"]?.ToString()))
+                            {
+                                _summonerCache[summonerId] = summonerData;
+                                return summonerData;
+                            }
+                        }
+                    }
+                }
+                catch (TaskCanceledException ex)
+                {
+                    Debug.WriteLine($"[LCU] GetSummonerById 超时 ({attempt}/{maxRetry}): {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[LCU] GetSummonerById 异常 ({attempt}/{maxRetry}): {ex.Message}");
                 }
 
-                var content = await response.Content.ReadAsStringAsync();
-                var summonerData = JObject.Parse(content);
+                if (attempt < maxRetry)
+                    await Task.Delay(350 + attempt * 250); // 约 600 / 850 / 1100ms
+            }
 
-                // 更新缓存
-                _summonerCache[summonerId] = summonerData;
+            return null;
+        }
 
-                return summonerData;
-            }
-            catch (TaskCanceledException ex)
-            {
-                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+        /// <summary>
+        /// 根据 PUUID 查询召唤师信息（SID=0 时的名字兜底）
+        /// </summary>
+        public async Task<JObject> GetSummonerByPuuidAsync(string puuid, int maxRetry = 3)
+        {
+            if (string.IsNullOrWhiteSpace(puuid) || puuid.Length < 10)
                 return null;
-            }
-            catch (Exception ex)
+
+            for (int attempt = 1; attempt <= maxRetry; attempt++)
             {
-                Debug.WriteLine($"根据ID查询召唤师异常: {ex}");
-                return null;
+                try
+                {
+                    // 使用此接口可以根据puuid拿到玩家名称，已验证
+                    var response = await _client.GetAsync(
+                        $"/lol-summoner/v2/summoners/puuid/{Uri.EscapeDataString(puuid)}");
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var content = await response.Content.ReadAsStringAsync();
+                        if (!string.IsNullOrWhiteSpace(content))
+                        {
+                            var data = JObject.Parse(content);
+                            if (!string.IsNullOrEmpty(data["gameName"]?.ToString()))
+                                return data;
+                        }
+                    }
+                }
+                catch (TaskCanceledException ex)
+                {
+                    Debug.WriteLine($"[LCU] GetSummonerByPuuid 超时 ({attempt}/{maxRetry}): {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[LCU] GetSummonerByPuuid 异常 ({attempt}/{maxRetry}): {ex.Message}");
+                }
+
+                if (attempt < maxRetry)
+                    await Task.Delay(350 + attempt * 250);
             }
+            return null;
         }
 
         /// <summary>

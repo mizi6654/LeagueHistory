@@ -472,7 +472,7 @@ namespace League.Clients
             // 国服：直接用配置里的 qq.com 地址
             if (IsTencentHost(configured))
             {
-                Debug.WriteLine($"[SGP] 国服 Endpoint: {configured}");
+                //Debug.WriteLine($"[SGP] 国服 Endpoint: {configured}");
                 return configured;
             }
 
@@ -541,7 +541,7 @@ namespace League.Clients
 
                 if (!string.IsNullOrEmpty(sgpUrl))
                 {
-                    Debug.WriteLine($"[SGP] 配置 Endpoint: {sgpUrl}");
+                    //Debug.WriteLine($"[SGP] 配置 Endpoint: {sgpUrl}");
                     return sgpUrl.TrimEnd('/');
                 }
             }

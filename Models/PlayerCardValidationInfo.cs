@@ -19,5 +19,10 @@ namespace League.Models
         public bool HasAvatar { get; set; }
 
         public int RetryCount { get; set; } = 0;   // 新增：防止无限重试
+
+        /// <summary>
+        /// true = 战绩已有，只需补名字；false = 名字+战绩都要重查
+        /// </summary>
+        public bool NameOnly { get; set; }
     }
 }

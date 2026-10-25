@@ -357,7 +357,7 @@ namespace League.Clients
                             var obj = JObject.Parse(json);
                             if (!string.IsNullOrEmpty(obj["puuid"]?.ToString()))
                             {
-                                Debug.WriteLine($"[LcuManager] summoner 就绪 ({i})");
+                                Debug.WriteLine($"[LcuManager] summoner 就绪，验证用户内容获取成功 ({i})次!");
                                 return true;
                             }
                         }

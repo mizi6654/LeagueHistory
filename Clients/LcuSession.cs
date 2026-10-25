@@ -168,6 +168,16 @@ namespace League.Clients
         }
 
         /// <summary>
+        /// 根据puuid查询玩家的名称等级信息
+        /// </summary>
+        /// <param name="puuid"></param>
+        /// <returns></returns>
+        public async Task<JObject> GetGameNameByPuuid(string puuid)
+        {
+            return await _summonerService.GetSummonerByPuuidAsync(puuid);
+        }
+
+        /// <summary>
         /// 获取当前登录玩家的等级隐私信息
         /// </summary>
         public async Task<JObject> GetCurrentSummoner()
