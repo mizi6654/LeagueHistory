@@ -32,6 +32,9 @@ namespace League
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(FormMain));
             panel1 = new Panel();
+            statusStrip1 = new StatusStrip();
+            toolStripStatusLabelConnection = new ToolStripStatusLabel();
+            toolStripStatusLabelTip = new ToolStripStatusLabel();
             imageTabControl1 = new ImageTabControl();
             tabPage1 = new TabPage();
             panelTab1 = new Panel();
@@ -92,6 +95,7 @@ namespace League
             rbModeCustom = new RadioButton();
             rbModeMatch = new RadioButton();
             panel1.SuspendLayout();
+            statusStrip1.SuspendLayout();
             imageTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
             panelTab1.SuspendLayout();
@@ -110,27 +114,52 @@ namespace League
             // panel1
             // 
             panel1.BorderStyle = BorderStyle.FixedSingle;
+            panel1.Controls.Add(statusStrip1);
             panel1.Controls.Add(imageTabControl1);
             panel1.Dock = DockStyle.Fill;
             panel1.Location = new Point(0, 0);
             panel1.Name = "panel1";
-            panel1.Size = new Size(1235, 810);
+            panel1.Size = new Size(1247, 826);
             panel1.TabIndex = 12;
+            // 
+            // statusStrip1
+            // 
+            statusStrip1.Items.AddRange(new ToolStripItem[] { toolStripStatusLabelConnection, toolStripStatusLabelTip });
+            statusStrip1.Location = new Point(0, 802);
+            statusStrip1.Name = "statusStrip1";
+            statusStrip1.Size = new Size(1245, 22);
+            statusStrip1.TabIndex = 1;
+            statusStrip1.Text = "statusStrip1";
+            // 
+            // toolStripStatusLabelConnection
+            // 
+            toolStripStatusLabelConnection.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold, GraphicsUnit.Point, 134);
+            toolStripStatusLabelConnection.ForeColor = Color.Blue;
+            toolStripStatusLabelConnection.Name = "toolStripStatusLabelConnection";
+            toolStripStatusLabelConnection.Size = new Size(53, 17);
+            toolStripStatusLabelConnection.Text = "检测中...";
+            // 
+            // toolStripStatusLabelTip
+            // 
+            toolStripStatusLabelTip.Name = "toolStripStatusLabelTip";
+            toolStripStatusLabelTip.Size = new Size(1146, 17);
+            toolStripStatusLabelTip.Spring = true;
+            toolStripStatusLabelTip.TextAlign = ContentAlignment.MiddleRight;
             // 
             // imageTabControl1
             // 
             imageTabControl1.Alignment = TabAlignment.Left;
+            imageTabControl1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             imageTabControl1.Controls.Add(tabPage1);
             imageTabControl1.Controls.Add(tabPage2);
             imageTabControl1.Controls.Add(tabPage3);
-            imageTabControl1.Dock = DockStyle.Fill;
             imageTabControl1.DrawMode = TabDrawMode.OwnerDrawFixed;
             imageTabControl1.ItemSize = new Size(50, 50);
-            imageTabControl1.Location = new Point(0, 0);
+            imageTabControl1.Location = new Point(-1, 3);
             imageTabControl1.Multiline = true;
             imageTabControl1.Name = "imageTabControl1";
             imageTabControl1.SelectedIndex = 0;
-            imageTabControl1.Size = new Size(1233, 808);
+            imageTabControl1.Size = new Size(1243, 796);
             imageTabControl1.SizeMode = TabSizeMode.Fixed;
             imageTabControl1.TabIndex = 0;
             imageTabControl1.Tag = "D:\\Develop\\csharp\\League\\bin\\Debug\\net8.0-windows\\Assets\\Defaults\\01.png";
@@ -143,7 +172,7 @@ namespace League
             tabPage1.Location = new Point(54, 4);
             tabPage1.Name = "tabPage1";
             tabPage1.Padding = new Padding(3);
-            tabPage1.Size = new Size(1175, 800);
+            tabPage1.Size = new Size(1185, 788);
             tabPage1.TabIndex = 0;
             tabPage1.Text = "查看历史";
             // 
@@ -156,7 +185,7 @@ namespace League
             panelTab1.Dock = DockStyle.Fill;
             panelTab1.Location = new Point(3, 3);
             panelTab1.Name = "panelTab1";
-            panelTab1.Size = new Size(1169, 794);
+            panelTab1.Size = new Size(1179, 782);
             panelTab1.TabIndex = 9;
             // 
             // btn_search
@@ -185,7 +214,7 @@ namespace League
             panelMatchList.AutoScroll = true;
             panelMatchList.Location = new Point(3, 34);
             panelMatchList.Name = "panelMatchList";
-            panelMatchList.Size = new Size(1162, 760);
+            panelMatchList.Size = new Size(1172, 755);
             panelMatchList.TabIndex = 8;
             // 
             // txtGameName
@@ -203,7 +232,7 @@ namespace League
             tabPage2.Location = new Point(54, 4);
             tabPage2.Name = "tabPage2";
             tabPage2.Padding = new Padding(3);
-            tabPage2.Size = new Size(1175, 800);
+            tabPage2.Size = new Size(1185, 788);
             tabPage2.TabIndex = 1;
             tabPage2.Text = "查看玩家";
             // 
@@ -213,7 +242,7 @@ namespace League
             penalGameMatchData.Dock = DockStyle.Fill;
             penalGameMatchData.Location = new Point(3, 3);
             penalGameMatchData.Name = "penalGameMatchData";
-            penalGameMatchData.Size = new Size(1169, 794);
+            penalGameMatchData.Size = new Size(1179, 782);
             penalGameMatchData.TabIndex = 1;
             // 
             // tableLayoutPanel1
@@ -230,7 +259,7 @@ namespace League
             tableLayoutPanel1.RowCount = 2;
             tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
             tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
-            tableLayoutPanel1.Size = new Size(1160, 739);
+            tableLayoutPanel1.Size = new Size(1170, 727);
             tableLayoutPanel1.TabIndex = 0;
             // 
             // tabPage3
@@ -238,7 +267,7 @@ namespace League
             tabPage3.Controls.Add(tabControl1);
             tabPage3.Location = new Point(54, 4);
             tabPage3.Name = "tabPage3";
-            tabPage3.Size = new Size(1175, 800);
+            tabPage3.Size = new Size(1185, 788);
             tabPage3.TabIndex = 2;
             tabPage3.Text = "功能配置";
             tabPage3.UseVisualStyleBackColor = true;
@@ -251,7 +280,7 @@ namespace League
             tabControl1.Location = new Point(0, 0);
             tabControl1.Name = "tabControl1";
             tabControl1.SelectedIndex = 0;
-            tabControl1.Size = new Size(1175, 800);
+            tabControl1.Size = new Size(1185, 788);
             tabControl1.TabIndex = 0;
             // 
             // tabPage4
@@ -266,7 +295,7 @@ namespace League
             tabPage4.Location = new Point(4, 26);
             tabPage4.Name = "tabPage4";
             tabPage4.Padding = new Padding(3);
-            tabPage4.Size = new Size(1167, 770);
+            tabPage4.Size = new Size(1177, 758);
             tabPage4.TabIndex = 0;
             tabPage4.Text = "功能辅助";
             tabPage4.UseVisualStyleBackColor = true;
@@ -605,7 +634,7 @@ namespace League
             tabPage5.Location = new Point(4, 26);
             tabPage5.Name = "tabPage5";
             tabPage5.Padding = new Padding(3);
-            tabPage5.Size = new Size(1167, 770);
+            tabPage5.Size = new Size(1177, 758);
             tabPage5.TabIndex = 1;
             tabPage5.Text = "消息发送";
             tabPage5.UseVisualStyleBackColor = true;
@@ -727,7 +756,7 @@ namespace League
             txtCustomContent.Location = new Point(12, 198);
             txtCustomContent.Multiline = true;
             txtCustomContent.Name = "txtCustomContent";
-            txtCustomContent.Size = new Size(545, 566);
+            txtCustomContent.Size = new Size(545, 554);
             txtCustomContent.TabIndex = 2;
             // 
             // rbModeCustom
@@ -756,7 +785,7 @@ namespace League
             // 
             AutoScaleDimensions = new SizeF(7F, 17F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1235, 810);
+            ClientSize = new Size(1247, 826);
             Controls.Add(panel1);
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
@@ -764,6 +793,9 @@ namespace League
             Text = "联盟视界 League v1.1.4";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
+            panel1.PerformLayout();
+            statusStrip1.ResumeLayout(false);
+            statusStrip1.PerformLayout();
             imageTabControl1.ResumeLayout(false);
             tabPage1.ResumeLayout(false);
             panelTab1.ResumeLayout(false);
@@ -849,5 +881,8 @@ namespace League
         private Label lblHotkeyMyTeam;
         private Panel panelTab1;
         private Label label8;
+        private StatusStrip statusStrip1;
+        private ToolStripStatusLabel toolStripStatusLabelConnection;
+        private ToolStripStatusLabel toolStripStatusLabelTip;
     }
 }

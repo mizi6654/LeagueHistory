@@ -81,6 +81,15 @@ namespace League.Clients
             _cacheFilePath = Path.Combine(appDir, "last_lcu_cache.json");
         }
 
+        /// <summary>
+        /// 由 SgpSession 在 JWT/URL 解析出真实大区后回写，避免命令行只有 TENCENT 时一直为空。
+        /// </summary>
+        public void SetSgpServerId(string? id)
+        {
+            if (!string.IsNullOrWhiteSpace(id))
+                SgpServerId = id.Trim();
+        }
+
         public Task StartAsync()
         {
             lock (_lock)

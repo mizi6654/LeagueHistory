@@ -282,6 +282,9 @@ namespace League.Managers
             {
                 Cursor.Current = Cursors.WaitCursor;
 
+                // 开始下载
+                _form._statusBar?.TipReplayDownloading();
+
                 var downloadResult = await Globals.lcuClient.DownloadReplayAsync(matchInfo.GameId);
 
                 switch (downloadResult)
@@ -291,6 +294,8 @@ namespace League.Managers
                         matchInfo.IsReplayDownloaded = true;
                         matchPanel.Invalidate();
 
+                        // 下载成功
+                        _form._statusBar?.TipReplayDone();
                         // 下载成功直接进回放，不再弹成功提示
                         await Globals.lcuClient.PlayReplayAsync(matchInfo.GameId);
                         break;
@@ -298,6 +303,9 @@ namespace League.Managers
                     case ReplayDownloadResult.Incompatible:
                         matchInfo.IsReplayExpired = true;
                         matchPanel.SetReplayStatus(matchInfo, "回放已过期");
+
+                        // 下载失败
+                        _form._statusBar?.TipReplayFailed("回放已过期/版本不兼容");
                         Debug.WriteLine($"[回放] GameId {matchInfo.GameId} 版本不兼容，回放已过期");
                         break;
 
@@ -325,6 +333,9 @@ namespace League.Managers
             try
             {
                 Cursor.Current = Cursors.WaitCursor;
+
+                // 开始进入回放
+                _form._statusBar?.ShowTip("正在打开回放...");
                 await Globals.lcuClient.PlayReplayAsync(matchInfo.GameId);
             }
             finally

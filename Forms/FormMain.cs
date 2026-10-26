@@ -29,6 +29,7 @@ namespace League
         // 英雄管理器（用于预加载所有英雄数据）
         private ChampionManager? _championManager;
         private ClientUtilityService? _clientUtility;   //客户端辅助
+        public StatusBarManager? _statusBar;
 
         // 原有字段
         private AsyncPoller _lcuPoller = new AsyncPoller();
@@ -103,11 +104,19 @@ namespace League
             _hotkeyManager.OnMyTeamHotkey += async () => await _chatSender.HandleMyTeamAsync();
             _hotkeyManager.OnFullTeamHotkey += async () => await _chatSender.HandleFullTeamAsync();
             _hotkeyManager.OnChampSelectF7 += async () => await _chatSender.HandleChampSelectF7Async();
+
+            // 状态栏（Designer 里已有 statusStrip1、两个 Label）
+            _statusBar = new StatusBarManager(
+                this,
+                toolStripStatusLabelConnection,
+                toolStripStatusLabelTip
+            );
         }
 
         public void SaveAppConfig()
         {
             LeagueConfigManager.Save(_appConfig);
+            _statusBar?.TipConfigSaved();   // 所有保存都会提示「配置已保存」
             //Debug.WriteLine("[配置] 主窗体保存配置完成");
         }
 
@@ -291,6 +300,7 @@ namespace League
 
                 // 启动时先显示「检测连接」状态
                 _uiManager!.SetLcuUiState(connected: false, inGame: false);
+                _statusBar?.SetDetecting();
 
                 Debug.WriteLine("[LCU] 启动 LcuManager 连接循环...");
                 await LcuManager.Instance.StartAsync();
@@ -388,8 +398,14 @@ namespace League
 
             _uiManager!.LcuReady = false;
             _uiManager!.IsGame = false;
+
             // 硬断开：显示「正在检测/重新连接…」并清空战绩相关面板
             _uiManager!.SetLcuUiState(false, false);
+            // 状态栏：与面板一致，不要写「已断开」
+            // LcuManager 主循环还在跑，下一轮还会重试
+            _statusBar?.SetDetecting();
+            // 若希望文案更明确，可在 StatusBarManager 加：
+            // _statusBar?.SetConnectionStatus("等待客户端...");
 
             _gameFlowWatcher?.ClearGameState();
             _gameFlowWatcher?.StopGameflowWatcher();
@@ -406,6 +422,7 @@ namespace League
             Debug.WriteLine("[LCU] OnLcuReconnecting");
             // 可选：状态栏/小提示「正在恢复连接…」，不要 SetLcuUiState(false) 清面板
             // 若你有 Toast/状态标签，可在这里改文字
+            _statusBar?.SetReconnecting();
         }
 
         /// <summary>
@@ -458,6 +475,21 @@ namespace League
                 Debug.WriteLine("SGP 连接初始化成功！");
             }
 
+            //   状态栏，用中文大区名；没有 SgpServerId 时至少显示「已连接」
+            //string region = SgpServerConfig.GetDisplayName(LcuManager.Instance.SgpServerId);
+            //_statusBar?.SetConnected(
+            //    string.IsNullOrWhiteSpace(LcuManager.Instance.SgpServerId) ? null : region);
+            // SGP 初始化完成后（ready 判断之后）
+            string sgpId = Globals.sgpClient.SgpServerId;           // SgpSession 解析到的
+            if (string.IsNullOrWhiteSpace(sgpId))
+                sgpId = LcuManager.Instance.SgpServerId;            // 命令行可能仍为空
+
+            string regionName = SgpServerConfig.GetDisplayName(sgpId);
+            _statusBar?.SetConnected(
+                string.IsNullOrWhiteSpace(sgpId) ? null : regionName);
+
+            Debug.WriteLine($"[状态栏] SgpId={sgpId}, 显示={regionName}");
+
             // 重建战绩列表 Tab 宿主
             InitializeMatchTabContent();
 
@@ -478,6 +510,10 @@ namespace League
 
                 if (_uiManager.IsGame && imageTabControl1.TabPages.Count > 1)
                     imageTabControl1.SelectedIndex = 1;
+
+                // 若已经在游戏中，状态栏改成「游戏中」
+                if (_uiManager.IsGame)
+                    _statusBar?.SetInGame(regionName);
             });
 
             _uiManager!.SetLcuUiState(_uiManager!.LcuReady, _uiManager!.IsGame);
@@ -1182,7 +1218,11 @@ namespace League
             _lcuPoller?.Stop();
             _tab1Poller?.Stop();
 
-            // 新增：停止 LcuManager
+            // 状态栏
+            _statusBar?.Dispose();
+            _statusBar = null;
+
+            // 停止 LcuManager
             LcuManager.Instance.Stop();
 
             // 取消事件订阅，防止内存泄漏

@@ -8,6 +8,7 @@ namespace League.Clients
     {
         private static Dictionary<string, (string MatchHistory, string Common)> _servers;
         private static bool _loaded;
+        private static Dictionary<string, string> _serverNamesZh;
 
         public static void Load(string explicitPath = null)
         {
@@ -49,6 +50,21 @@ namespace League.Clients
                 {
                     var root = JObject.Parse(json);
                     var servers = root["servers"] as JObject;
+
+                    // 获取中文大区信息
+                    var namesRoot = root["serverNames"] as JObject;
+                    var zh = namesRoot?["zh-CN"] as JObject;
+                    _serverNamesZh = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    if (zh != null)
+                    {
+                        foreach (var prop in zh.Properties())
+                        {
+                            var name = prop.Value?.ToString();
+                            if (!string.IsNullOrWhiteSpace(name))
+                                _serverNamesZh[prop.Name] = name;
+                        }
+                    }
+
                     if (servers != null)
                     {
                         foreach (var prop in servers.Properties())
@@ -137,6 +153,56 @@ namespace League.Clients
 
             // 外服有时只有 region=TW 等，未必够用，仍返回供尝试；表 miss 再补全
             return regionTrim.ToUpperInvariant();
+        }
+
+        /// <summary>
+        /// SgpServerId → 显示名（如 TENCENT_HN1 → 艾欧尼亚）。找不到则返回原 ID。
+        /// </summary>
+        public static string GetDisplayName(string sgpServerId)
+        {
+            if (!_loaded) Load();
+            if (string.IsNullOrWhiteSpace(sgpServerId))
+                return "未知大区";
+
+            if (_serverNamesZh != null &&
+                _serverNamesZh.TryGetValue(sgpServerId.Trim(), out var name) &&
+                !string.IsNullOrWhiteSpace(name))
+                return name;
+
+            return sgpServerId.Trim();
+        }
+
+        /// <summary>
+        /// SgpServerId，用 URL 反查配置表
+        /// </summary>
+        /// <param name="url"></param>
+        /// <param name="serverId"></param>
+        /// <returns></returns>
+        public static bool TryGetServerIdByMatchHistoryUrl(string url, out string serverId)
+        {
+            serverId = null;
+            if (!_loaded) Load();
+            if (string.IsNullOrWhiteSpace(url) || _servers == null) return false;
+
+            string norm = url.Trim().TrimEnd('/');
+            foreach (var kv in _servers)
+            {
+                if (string.Equals(kv.Value.MatchHistory, norm, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(kv.Value.Common, norm, StringComparison.OrdinalIgnoreCase))
+                {
+                    serverId = kv.Key;
+                    return true;
+                }
+                // 宽松：host 一致也算（防止端口/路径差异）
+                if (Uri.TryCreate(norm, UriKind.Absolute, out var u1) &&
+                    Uri.TryCreate(kv.Value.MatchHistory, UriKind.Absolute, out var u2) &&
+                    string.Equals(u1.Host, u2.Host, StringComparison.OrdinalIgnoreCase))
+                {
+                    serverId = kv.Key;
+                    return true;
+                }
+            }
+            return false;
         }
     }
 }

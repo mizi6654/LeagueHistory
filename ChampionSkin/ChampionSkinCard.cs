@@ -31,9 +31,49 @@ namespace League.ChampionSkin
         {
             InitializeComponent();
             Width = 158;
+            Height = 215;
             BorderStyle = BorderStyle.FixedSingle;
             Padding = new Padding(4);
             Margin = new Padding(6);
+
+            InitSkinBar();
+        }
+
+        private void InitSkinBar()
+        {
+            // 视口不滚动
+            panelSkinViewport.AutoScroll = false;
+
+            // 皮肤条：单行、随内容变宽
+            flpSkins.WrapContents = false;
+            flpSkins.FlowDirection = FlowDirection.LeftToRight;
+            flpSkins.AutoSize = true;
+            flpSkins.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            flpSkins.AutoScroll = false;
+            flpSkins.Height = 40;
+            flpSkins.Top = 4;
+            flpSkins.Left = 0;
+            flpSkins.Padding = Padding.Empty;
+            flpSkins.Margin = Padding.Empty;
+
+            btnSkinLeft.Click -= BtnSkinLeft_Click;
+            btnSkinRight.Click -= BtnSkinRight_Click;
+            btnSkinLeft.Click += BtnSkinLeft_Click;
+            btnSkinRight.Click += BtnSkinRight_Click;
+
+            // 可选：滚轮左右滑（鼠标在视口上时）
+            panelSkinViewport.MouseWheel -= PanelSkinViewport_MouseWheel;
+            panelSkinViewport.MouseWheel += PanelSkinViewport_MouseWheel;
+
+            UpdateSkinArrows();
+        }
+
+        private void BtnSkinLeft_Click(object? sender, EventArgs e) => ScrollSkins(-1);
+        private void BtnSkinRight_Click(object? sender, EventArgs e) => ScrollSkins(+1);
+
+        private void PanelSkinViewport_MouseWheel(object? sender, MouseEventArgs e)
+        {
+            ScrollSkins(e.Delta > 0 ? -1 : +1);
         }
 
         public void SetImageCache(SkinBrowserImageCache cache) => _cache = cache;
@@ -189,7 +229,11 @@ namespace League.ChampionSkin
         private void BuildSkinThumbs(List<SkinThumbItem>? skins)
         {
             ClearSkinFrames();
-            if (skins == null || skins.Count == 0) return;
+            if (skins == null || skins.Count == 0)
+            {
+                UpdateSkinArrows(0);
+                return;
+            }
 
             string champDir = Path.Combine(Application.StartupPath, "Assets", "champion");
             var tip = new ToolTip { InitialDelay = 50, ReshowDelay = 50, AutoPopDelay = 5000 };
@@ -199,10 +243,10 @@ namespace League.ChampionSkin
                 bool isBase = s.IsBase || (s.SkinId % 1000 == 0);
                 var frame = new Panel
                 {
-                    Width = 33,
-                    Height = 33,
-                    Margin = new Padding(2),
-                    Padding = new Padding(3), // 选中时露出的边框更粗
+                    Width = 28,
+                    Height = 28,
+                    Margin = new Padding(1),
+                    Padding = new Padding(2),
                     BackColor = Color.FromArgb(50, 50, 50),
                     Tag = s
                 };
@@ -247,6 +291,64 @@ namespace League.ChampionSkin
                 frame.Controls.Add(box);
                 flpSkins.Controls.Add(frame);
             }
+            // 加完后复位滚动并更新箭头
+            ResetSkinScroll();
+        }
+
+        /// <summary>
+        /// direction: -1 内容向右移（看左边），+1 内容向左移（看右边）
+        /// </summary>
+        private void ScrollSkins(int direction)
+        {
+            if (flpSkins == null || panelSkinViewport == null) return;
+
+            const int step = 64; // 大约两格
+            int contentW = Math.Max(flpSkins.Width, flpSkins.PreferredSize.Width);
+            int viewW = panelSkinViewport.Width;
+            int max = Math.Max(0, contentW - viewW);
+
+            int next = Math.Clamp(flpSkins.Left - direction * step, -max, 0);
+            flpSkins.Left = next;
+            UpdateSkinArrows(max);
+        }
+
+        private void UpdateSkinArrows(int maxScroll = -1)
+        {
+            if (btnSkinLeft == null || btnSkinRight == null || flpSkins == null || panelSkinViewport == null)
+                return;
+
+            int contentW = Math.Max(flpSkins.Width, flpSkins.PreferredSize.Width);
+            if (maxScroll < 0)
+                maxScroll = Math.Max(0, contentW - panelSkinViewport.Width);
+
+            bool need = maxScroll > 0;
+            btnSkinLeft.Enabled = need && flpSkins.Left < 0;
+            btnSkinRight.Enabled = need && flpSkins.Left > -maxScroll;
+        }
+
+        /// <summary>格子加完后复位并刷新箭头</summary>
+        private void ResetSkinScroll()
+        {
+            if (flpSkins == null) return;
+
+            flpSkins.SuspendLayout();
+            try
+            {
+                flpSkins.Left = 0;
+                flpSkins.PerformLayout();
+
+                // AutoSize 有时 Width 仍为 0，用 PreferredSize 兜底
+                int w = flpSkins.PreferredSize.Width;
+                if (w > 0)
+                    flpSkins.Width = w;
+                flpSkins.Height = 40;
+            }
+            finally
+            {
+                flpSkins.ResumeLayout(true);
+            }
+
+            UpdateSkinArrows();
         }
 
         private void ApplySelectionHighlight()
@@ -363,6 +465,8 @@ namespace League.ChampionSkin
                 DisposeSkinFrame(c);
             flpSkins.Controls.Clear();
             _selectedFrame = null;
+
+            ResetSkinScroll();
         }
 
         private void DisposeSkinFrame(Control c)

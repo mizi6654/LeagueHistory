@@ -817,28 +817,37 @@ namespace League.ChampionSkin
 
         private void ChampionSkinBrowser_FormClosing(object? sender, FormClosingEventArgs e)
         {
-            _searchDebounce?.Stop();
-            _loadCts?.Cancel();
-
-            Opacity = 0;
-            Visible = false;
-            ShowInTaskbar = false;
-
-            if (Owner is FormMain main)
-                main.SaveAppConfig();
-
-            foreach (var card in _cardPool.Values)
-                card.PreferredSkinChanged -= OnPreferredSkinChanged;
-
-            _cardPool.Clear();
-            flpCards.Controls.Clear();
-
-            var cache = _imgCache;
-            _imgCache = new SkinBrowserImageCache();
-            ThreadPool.QueueUserWorkItem(_ =>
+            try
             {
-                try { cache.Dispose(); } catch { }
-            });
+                _searchDebounce?.Stop();
+                _searchDebounce?.Dispose();
+                _searchDebounce = null;
+
+                _loadCts?.Cancel();
+
+                // 解绑即可，不要在这里 Controls.Clear / 逐张 Dispose
+                foreach (var card in _cardPool.Values)
+                {
+                    try { card.PreferredSkinChanged -= OnPreferredSkinChanged; }
+                    catch { }
+                }
+                _cardPool.Clear();
+
+                // 图片缓存放到线程池释放（不要碰 Control）
+                var cache = _imgCache;
+                _imgCache = new SkinBrowserImageCache();
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    try { cache?.Dispose(); } catch { }
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ChampionSkinBrowser] FormClosing: {ex.Message}");
+            }
+
+            // 不要：Opacity/Visible 花活 + 后台 Clear 控件
+            // 窗体关时框架会自己 Dispose 子控件
         }
 
         #endregion

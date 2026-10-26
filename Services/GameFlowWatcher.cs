@@ -156,9 +156,28 @@ namespace League.Services
             }
         }
 
+        /// <summary>
+        /// 更新窗体状态条信息
+        /// </summary>
+        /// <returns></returns>
+        private static string? GetRegionDisplayName()
+        {
+            // 优先 SgpSession（JWT/URL 反查后才有值），再退回 LcuManager
+            string? id = FormMain.Globals.sgpClient.SgpServerId;
+            if (string.IsNullOrWhiteSpace(id))
+                id = LcuManager.Instance.SgpServerId;
+            if (string.IsNullOrWhiteSpace(id))
+                return null;
+            return SgpServerConfig.GetDisplayName(id);
+        }
+
         private async Task HandleQueuePhase(string phase)
         {
             _uiManager.IsGame = false;
+
+            // 更新状态栏
+            _form._statusBar?.SetInGame(GetRegionDisplayName());
+
             _cardManager.ClearAllCaches();
             _cardManager.ClearGameState();
             _matchQueryProcessor.ClearPlayerMatchCache();
@@ -182,6 +201,10 @@ namespace League.Services
         private async Task HandleChampSelectStart()
         {
             _uiManager.IsGame = true;
+
+            // 更新状态栏
+            _form._statusBar?.SetInGame(GetRegionDisplayName());
+
             await _cardDisplayService.EnterChampSelectAsync();
             _autoPickService.StartChampSelectMonitoring(_cardDisplayService);
         }
@@ -190,6 +213,9 @@ namespace League.Services
         {
             _autoPickService.Stop();
             _uiManager.IsGame = true;
+
+            // 更新状态栏
+            _form._statusBar?.SetInGame(GetRegionDisplayName());
 
             bool fromNormalFlow =
                 previousPhase == "ChampSelect"
@@ -223,6 +249,10 @@ namespace League.Services
 
         private async Task HandleGameEnd(string? previousPhase)
         {
+            _uiManager.IsGame = false;
+            // 更新状态栏
+            _form._statusBar?.SetInGame(GetRegionDisplayName());
+
             Debug.WriteLine($"[HandleGameEnd] 被调用 | previousPhase={previousPhase}");
 
             bool shouldHandle = previousPhase == "InProgress"

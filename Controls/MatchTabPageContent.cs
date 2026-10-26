@@ -145,10 +145,34 @@ namespace League.Controls
         /// </summary>
         private string GetSelectedFilterText()
         {
+            if (comboFilter == null || comboFilter.IsDisposed)
+                return FallbackFilterText();
+
+            // 必须在 UI 线程读 SelectedItem
+            if (comboFilter.InvokeRequired)
+            {
+                try
+                {
+                    return (string)comboFilter.Invoke(new Func<string>(GetSelectedFilterText));
+                }
+                catch (ObjectDisposedException)
+                {
+                    return FallbackFilterText();
+                }
+                catch (InvalidOperationException)
+                {
+                    return FallbackFilterText();
+                }
+            }
+
             if (comboFilter.SelectedItem is QueueFilterItem item && !string.IsNullOrEmpty(item.Text))
                 return item.Text;
 
-            // 兜底：按 Value 映射
+            return FallbackFilterText();
+        }
+
+        private string FallbackFilterText()
+        {
             return _selectedQueueId switch
             {
                 "q_420" => "单双排位",
@@ -689,11 +713,28 @@ namespace League.Controls
 
         private async Task OnFilterChanged()
         {
-            var item = comboFilter.SelectedItem as QueueFilterItem;
+            QueueFilterItem? item = null;
+
+            if (comboFilter != null && !comboFilter.IsDisposed)
+            {
+                if (comboFilter.InvokeRequired)
+                {
+                    try
+                    {
+                        item = (QueueFilterItem?)comboFilter.Invoke(
+                            new Func<QueueFilterItem?>(() => comboFilter.SelectedItem as QueueFilterItem));
+                    }
+                    catch { /* 忽略 */ }
+                }
+                else
+                {
+                    item = comboFilter.SelectedItem as QueueFilterItem;
+                }
+            }
+
             _selectedQueueId = item?.Value;
 
-            int desiredPageSize = string.IsNullOrEmpty(_selectedQueueId) ? 7 : 7;
-
+            int desiredPageSize = 7;
             if (_pageSize != desiredPageSize)
             {
                 SafeSetSelectedItem(comboPage, desiredPageSize);
