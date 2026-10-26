@@ -301,6 +301,7 @@ namespace League
                 // 启动时先显示「检测连接」状态
                 _uiManager!.SetLcuUiState(connected: false, inGame: false);
                 _statusBar?.SetDetecting();
+                _statusBar?.ClearTip();
 
                 Debug.WriteLine("[LCU] 启动 LcuManager 连接循环...");
                 await LcuManager.Instance.StartAsync();
@@ -404,6 +405,7 @@ namespace League
             // 状态栏：与面板一致，不要写「已断开」
             // LcuManager 主循环还在跑，下一轮还会重试
             _statusBar?.SetDetecting();
+            _statusBar?.ClearTip();
             // 若希望文案更明确，可在 StatusBarManager 加：
             // _statusBar?.SetConnectionStatus("等待客户端...");
 
@@ -423,6 +425,7 @@ namespace League
             // 可选：状态栏/小提示「正在恢复连接…」，不要 SetLcuUiState(false) 清面板
             // 若你有 Toast/状态标签，可在这里改文字
             _statusBar?.SetReconnecting();
+            _statusBar?.ClearTip();
         }
 
         /// <summary>

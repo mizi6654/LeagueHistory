@@ -277,12 +277,15 @@ namespace League.Managers
             if (result != DialogResult.OK)
                 return;
 
+            Debug.WriteLine($"[回放] 确认下载 GameId={matchInfo.GameId}");
+            Debug.WriteLine($"[回放] _statusBar is null? {_form._statusBar == null}");
+
             Cursor previousCursor = Cursor.Current;
             try
             {
                 Cursor.Current = Cursors.WaitCursor;
 
-                // 开始下载
+                // 开始下载 —— 不自动清空，等结果再改
                 _form._statusBar?.TipReplayDownloading();
 
                 var downloadResult = await Globals.lcuClient.DownloadReplayAsync(matchInfo.GameId);
@@ -305,16 +308,19 @@ namespace League.Managers
                         matchPanel.SetReplayStatus(matchInfo, "回放已过期");
 
                         // 下载失败
-                        _form._statusBar?.TipReplayFailed("回放已过期/版本不兼容");
+                        _form._statusBar?.ShowTip("回放已过期/版本不兼容");
                         Debug.WriteLine($"[回放] GameId {matchInfo.GameId} 版本不兼容，回放已过期");
                         break;
 
                     case ReplayDownloadResult.Timeout:
+                        _form._statusBar?.ShowTip("下载超时");
+                        break;
                     case ReplayDownloadResult.Failed:
                     case ReplayDownloadResult.RequestError:
                     default:
                         Debug.WriteLine($"[回放] GameId {matchInfo.GameId} 下载失败: {downloadResult}");
                         // 可选：UpdateReplayButtonStatus(matchPanel, matchInfo, "下载失败");
+                        _form._statusBar?.ShowTip("下载失败");
                         break;
                 }
             }
@@ -335,8 +341,9 @@ namespace League.Managers
                 Cursor.Current = Cursors.WaitCursor;
 
                 // 开始进入回放
-                _form._statusBar?.ShowTip("正在打开回放...");
+                _form._statusBar?.ShowTip("正在打开回放...", 0);
                 await Globals.lcuClient.PlayReplayAsync(matchInfo.GameId);
+                _form._statusBar?.ShowTip("回放已打开");   // 或 ClearTip()
             }
             finally
             {

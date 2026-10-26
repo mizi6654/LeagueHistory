@@ -52,6 +52,22 @@ namespace League.UIState
         public void SetInGame(string? region = null)
             => SetConnectionStatus("游戏中", region);
 
+        /// <summary>查找匹配中</summary>
+        public void SetMatching(string? region = null)
+            => SetConnectionStatus("查找匹配中", region);
+
+        /// <summary>选人中</summary>
+        public void SetChampSelect(string? region = null)
+            => SetConnectionStatus("选人中", region);
+
+        /// <summary>游戏已结束</summary>
+        public void SetGameEnded(string? region = null)
+            => SetConnectionStatus("游戏已结束", region);
+
+        /// <summary>空闲中</summary>
+        public void SetIdle(string? region = null)
+            => SetConnectionStatus("空闲中", region);
+
         /// <summary>
         /// 通用：更新左侧连接状态与大区。
         /// region 传 null 表示清空大区；传空字符串表示保持上次大区不变。
@@ -85,7 +101,7 @@ namespace League.UIState
         /// <summary>
         /// 显示临时提示。autoClearMs &lt;= 0 表示不自动清空。
         /// </summary>
-        public void ShowTip(string message, int autoClearMs = 4000)
+        public void ShowTip(string message, int autoClearMs = 5000)
         {
             SafeSetTip(message ?? "");
 

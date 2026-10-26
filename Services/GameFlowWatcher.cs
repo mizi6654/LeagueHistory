@@ -113,11 +113,19 @@ namespace League.Services
                     case "Matchmaking":
                     case "ReadyCheck":
                         _wasInGameBeforeDisconnect = false;
+
+                        // 查找匹配中
+                        _form._statusBar?.SetMatching(GetRegionDisplayName());
+
                         await HandleQueuePhase(phase);
                         break;
 
                     case "ChampSelect":
                         _cardManager.ResetHiddenSessionLogFlags();
+
+                        // 选人中
+                        _form._statusBar?.SetChampSelect(GetRegionDisplayName());
+
                         await HandleChampSelectStart();
                         break;
 
@@ -127,6 +135,9 @@ namespace League.Services
                         break;
 
                     case "InProgress":
+                        // 游戏中
+                        _form._statusBar?.SetInGame(GetRegionDisplayName());
+
                         await HandleGameInProgress(previousPhase);
                         _wasInGameBeforeDisconnect = false;
                         break;
@@ -135,6 +146,10 @@ namespace League.Services
                     case "PreEndOfGame":
                     case "WaitingForStats":
                         _wasInGameBeforeDisconnect = false;
+
+                        // 游戏已结束
+                        _form._statusBar?.SetGameEnded(GetRegionDisplayName());
+
                         Debug.WriteLine($"[GameEnd Trigger] 检测到结束阶段: {phase}, previous={previousPhase}");
                         await HandleGameEnd(previousPhase);
                         break;
@@ -142,6 +157,10 @@ namespace League.Services
                     case "Lobby":
                     case "None":
                         _wasInGameBeforeDisconnect = false;
+
+                        // 空闲中
+                        _form._statusBar?.SetIdle(GetRegionDisplayName());
+
                         if (_cleanupService.ShouldReturnToLobby())
                         {
                             Debug.WriteLine($"[Lobby] 检测到刚结束游戏，开始返回模式 {Globals.CurrGameMod}");
@@ -174,10 +193,6 @@ namespace League.Services
         private async Task HandleQueuePhase(string phase)
         {
             _uiManager.IsGame = false;
-
-            // 更新状态栏
-            _form._statusBar?.SetInGame(GetRegionDisplayName());
-
             _cardManager.ClearAllCaches();
             _cardManager.ClearGameState();
             _matchQueryProcessor.ClearPlayerMatchCache();
@@ -201,10 +216,6 @@ namespace League.Services
         private async Task HandleChampSelectStart()
         {
             _uiManager.IsGame = true;
-
-            // 更新状态栏
-            _form._statusBar?.SetInGame(GetRegionDisplayName());
-
             await _cardDisplayService.EnterChampSelectAsync();
             _autoPickService.StartChampSelectMonitoring(_cardDisplayService);
         }
@@ -213,10 +224,6 @@ namespace League.Services
         {
             _autoPickService.Stop();
             _uiManager.IsGame = true;
-
-            // 更新状态栏
-            _form._statusBar?.SetInGame(GetRegionDisplayName());
-
             bool fromNormalFlow =
                 previousPhase == "ChampSelect"
                 || previousPhase == "GameStart"
@@ -249,10 +256,6 @@ namespace League.Services
 
         private async Task HandleGameEnd(string? previousPhase)
         {
-            _uiManager.IsGame = false;
-            // 更新状态栏
-            _form._statusBar?.SetInGame(GetRegionDisplayName());
-
             Debug.WriteLine($"[HandleGameEnd] 被调用 | previousPhase={previousPhase}");
 
             bool shouldHandle = previousPhase == "InProgress"

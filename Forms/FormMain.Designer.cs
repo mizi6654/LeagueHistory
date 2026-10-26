@@ -144,7 +144,7 @@ namespace League
             toolStripStatusLabelTip.Name = "toolStripStatusLabelTip";
             toolStripStatusLabelTip.Size = new Size(1146, 17);
             toolStripStatusLabelTip.Spring = true;
-            toolStripStatusLabelTip.TextAlign = ContentAlignment.MiddleRight;
+            toolStripStatusLabelTip.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // imageTabControl1
             // 
