@@ -330,7 +330,7 @@ namespace League.ChampionSkin
                     card.PreferredSkinChanged += OnPreferredSkinChanged;
                     card.Visible = false;
                     _cardPool[model.ChampionId] = card;
-                    flpCards.Controls.Add(card);
+                    //flpCards.Controls.Add(card);  // 确认不要预先全加进 flpCards
                 }
             }
             finally
@@ -346,6 +346,10 @@ namespace League.ChampionSkin
             try
             {
                 EnsureCardPool();
+
+                // 筛选一变，丢掉还没刷完的旧 UI 任务，避免和拖动抢消息
+                lock (_pendingUiLock)
+                    _pendingUi.Clear();
 
                 string keyword = txtSearch.Text?.Trim() ?? "";
                 bool ownedOnly = chkOwnedOnly.Checked;
@@ -377,26 +381,18 @@ namespace League.ChampionSkin
                 }
 
                 var list = q.OrderBy(m => m.Name).ToList();
-                var wantIds = new HashSet<int>(list.Select(m => m.ChampionId));
 
                 flpCards.SuspendLayout();
                 try
                 {
-                    // 只改 Visible 真正变化的卡，避免对上百张重复赋值触发布局
-                    foreach (var kv in _cardPool)
-                    {
-                        var card = kv.Value;
-                        bool show = wantIds.Contains(kv.Key);
-                        if (card.Visible != show)
-                            card.Visible = show;
-                    }
+                    // 关键：只把「当前列表」放进容器，其它卡留在池子里但不参与布局
+                    flpCards.Controls.Clear();
 
-                    // 按筛选结果排序（FlowLayoutPanel 按 Controls 顺序排）
-                    int index = 0;
                     foreach (var model in list)
                     {
                         if (!_cardPool.TryGetValue(model.ChampionId, out var card)) continue;
-                        flpCards.Controls.SetChildIndex(card, index++);
+                        card.Visible = true;
+                        flpCards.Controls.Add(card);
                     }
                 }
                 finally
@@ -407,7 +403,6 @@ namespace League.ChampionSkin
                 int withSkin = list.Count(m => m.Skins.Any(s => !s.IsBase && s.SkinId % 1000 != 0));
                 lblStats.Text = $"共 {list.Count} 英雄，其中 {withSkin} 个有皮肤";
 
-                // 异步补图，不要 await
                 _ = LoadHeroIconsAsync();
                 _ = LoadSkinThumbsAsync();
             }
@@ -990,13 +985,17 @@ namespace League.ChampionSkin
         private void FlushPendingUi()
         {
             if (IsDisposed) return;
+
+            const int maxPerTick = 12; // 每 120ms 最多处理 12 个上图动作
             List<Action> batch;
             lock (_pendingUiLock)
             {
                 if (_pendingUi.Count == 0) return;
-                batch = new List<Action>(_pendingUi);
-                _pendingUi.Clear();
+                int n = Math.Min(maxPerTick, _pendingUi.Count);
+                batch = _pendingUi.GetRange(0, n);
+                _pendingUi.RemoveRange(0, n);
             }
+
             foreach (var a in batch)
             {
                 try { a(); } catch { }
