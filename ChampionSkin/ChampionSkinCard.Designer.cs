@@ -42,9 +42,9 @@
             // picHero
             // 
             picHero.Image = Properties.Resources.无极剑圣;
-            picHero.Location = new Point(3, 3);
+            picHero.Location = new Point(6, 6);
             picHero.Name = "picHero";
-            picHero.Size = new Size(150, 150);
+            picHero.Size = new Size(250, 360);
             picHero.SizeMode = PictureBoxSizeMode.Zoom;
             picHero.TabIndex = 1;
             picHero.TabStop = false;
@@ -65,17 +65,17 @@
             panelSkinBar.Controls.Add(panelSkinViewport);
             panelSkinBar.Controls.Add(btnSkinLeft);
             panelSkinBar.Controls.Add(btnSkinRight);
-            panelSkinBar.Location = new Point(5, 159);
+            panelSkinBar.Location = new Point(6, 372);
             panelSkinBar.Name = "panelSkinBar";
-            panelSkinBar.Size = new Size(150, 48);
+            panelSkinBar.Size = new Size(250, 58);
             panelSkinBar.TabIndex = 3;
             // 
             // panelSkinViewport
             // 
             panelSkinViewport.Controls.Add(flpSkins);
-            panelSkinViewport.Location = new Point(18, 0);
+            panelSkinViewport.Location = new Point(20, 0);
             panelSkinViewport.Name = "panelSkinViewport";
-            panelSkinViewport.Size = new Size(114, 48);
+            panelSkinViewport.Size = new Size(210, 58);
             panelSkinViewport.TabIndex = 4;
             // 
             // btnSkinLeft
@@ -83,7 +83,7 @@
             btnSkinLeft.FlatStyle = FlatStyle.Flat;
             btnSkinLeft.Location = new Point(0, 0);
             btnSkinLeft.Name = "btnSkinLeft";
-            btnSkinLeft.Size = new Size(15, 48);
+            btnSkinLeft.Size = new Size(20, 58);
             btnSkinLeft.TabIndex = 0;
             btnSkinLeft.Text = "◀";
             btnSkinLeft.UseVisualStyleBackColor = true;
@@ -91,9 +91,9 @@
             // btnSkinRight
             // 
             btnSkinRight.FlatStyle = FlatStyle.Flat;
-            btnSkinRight.Location = new Point(132, 0);
+            btnSkinRight.Location = new Point(230, 0);
             btnSkinRight.Name = "btnSkinRight";
-            btnSkinRight.Size = new Size(15, 48);
+            btnSkinRight.Size = new Size(20, 58);
             btnSkinRight.TabIndex = 1;
             btnSkinRight.Text = "▶";
             btnSkinRight.UseVisualStyleBackColor = true;
@@ -104,8 +104,10 @@
             AutoScaleMode = AutoScaleMode.Font;
             Controls.Add(panelSkinBar);
             Controls.Add(picHero);
+            Margin = new Padding(8);
             Name = "ChampionSkinCard";
-            Size = new Size(158, 215);
+            Padding = new Padding(6);
+            Size = new Size(262, 438);
             ((System.ComponentModel.ISupportInitialize)picHero).EndInit();
             panelSkinBar.ResumeLayout(false);
             panelSkinViewport.ResumeLayout(false);

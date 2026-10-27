@@ -31,6 +31,7 @@
             label1 = new Label();
             txtSearch = new TextBox();
             groupBox1 = new GroupBox();
+            label2 = new Label();
             BtnClearPrefs = new Button();
             chkHasSkinOnly = new CheckBox();
             lblStats = new Label();
@@ -42,7 +43,6 @@
             btnTop = new Button();
             btnAll = new Button();
             flpCards = new FlowLayoutPanel();
-            label2 = new Label();
             groupBox1.SuspendLayout();
             SuspendLayout();
             // 
@@ -80,10 +80,20 @@
             groupBox1.Controls.Add(label1);
             groupBox1.Location = new Point(12, 12);
             groupBox1.Name = "groupBox1";
-            groupBox1.Size = new Size(1062, 99);
+            groupBox1.Size = new Size(1164, 99);
             groupBox1.TabIndex = 2;
             groupBox1.TabStop = false;
             groupBox1.Text = "查看英雄";
+            // 
+            // label2
+            // 
+            label2.Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point, 134);
+            label2.ForeColor = Color.IndianRed;
+            label2.Location = new Point(766, 23);
+            label2.Name = "label2";
+            label2.Size = new Size(285, 58);
+            label2.TabIndex = 12;
+            label2.Text = "提示：点击哪个皮肤为高亮，并勾选了是否自动配置皮肤，那么在选人窗口时锁定英雄后就会自动切换高亮的皮肤";
             // 
             // BtnClearPrefs
             // 
@@ -191,24 +201,14 @@
             flpCards.Location = new Point(12, 117);
             flpCards.Name = "flpCards";
             flpCards.Padding = new Padding(3);
-            flpCards.Size = new Size(1062, 559);
+            flpCards.Size = new Size(1164, 559);
             flpCards.TabIndex = 3;
-            // 
-            // label2
-            // 
-            label2.Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point, 134);
-            label2.ForeColor = Color.IndianRed;
-            label2.Location = new Point(766, 23);
-            label2.Name = "label2";
-            label2.Size = new Size(285, 58);
-            label2.TabIndex = 12;
-            label2.Text = "提示：点击哪个皮肤为高亮，并勾选了是否自动配置皮肤，那么在选人窗口时锁定英雄后就会自动切换高亮的皮肤";
             // 
             // ChampionSkinBrowser
             // 
             AutoScaleDimensions = new SizeF(7F, 17F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1082, 688);
+            ClientSize = new Size(1184, 688);
             Controls.Add(flpCards);
             Controls.Add(groupBox1);
             Name = "ChampionSkinBrowser";

@@ -1,15 +1,22 @@
 ﻿using League.Caching;
 using League.Models;
-using System.Diagnostics;
 
 namespace League.ChampionSkin
 {
     /// <summary>
-    /// 单个英雄卡片：上方大图，下方皮肤小格（金黄框为当前选中）。
+    /// 单个英雄卡片：上方预览 250x360，下方皮肤小格 50x50（可左右滑动）。
     /// 图片走 SkinBrowserImageCache；皮肤文件优先 .jpg，兼容旧 .png。
     /// </summary>
     public partial class ChampionSkinCard : UserControl
     {
+        #region 尺寸常量
+
+        private const int PreviewW = 250;
+        private const int PreviewH = 360;
+        private const int ThumbSize = 50;
+
+        #endregion
+
         #region 字段
 
         private int _championId;
@@ -21,7 +28,9 @@ namespace League.ChampionSkin
         public event Action<int, int>? PreferredSkinChanged;
 
         private static readonly Color SkinFrameNormal = Color.FromArgb(50, 50, 50);
-        private static readonly Color SkinFrameSelected = Color.FromArgb(255, 40, 40); // 亮红
+        private static readonly Color SkinFrameSelected = Color.FromArgb(255, 40, 40);
+
+        public void RefreshPreviewFromDisk() => ApplyHeroPreview();
 
         #endregion
 
@@ -30,27 +39,34 @@ namespace League.ChampionSkin
         public ChampionSkinCard()
         {
             InitializeComponent();
-            Width = 158;
-            Height = 215;
+
+            // 反射再兜一层（部分容器有效）
+            typeof(Control).GetProperty("DoubleBuffered",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(this, true);
+
+            // 与设计器一致，防止被其它地方覆盖
+            Width = 262;
+            Height = 438;
             BorderStyle = BorderStyle.FixedSingle;
-            Padding = new Padding(4);
-            Margin = new Padding(6);
+            Padding = new Padding(6);
+            Margin = new Padding(8);
 
             InitSkinBar();
         }
 
         private void InitSkinBar()
         {
-            // 视口不滚动
+            if (panelSkinViewport == null || flpSkins == null) return;
+
             panelSkinViewport.AutoScroll = false;
 
-            // 皮肤条：单行、随内容变宽
             flpSkins.WrapContents = false;
             flpSkins.FlowDirection = FlowDirection.LeftToRight;
             flpSkins.AutoSize = true;
             flpSkins.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             flpSkins.AutoScroll = false;
-            flpSkins.Height = 40;
+            flpSkins.Height = ThumbSize + 8;
             flpSkins.Top = 4;
             flpSkins.Left = 0;
             flpSkins.Padding = Padding.Empty;
@@ -61,7 +77,6 @@ namespace League.ChampionSkin
             btnSkinLeft.Click += BtnSkinLeft_Click;
             btnSkinRight.Click += BtnSkinRight_Click;
 
-            // 可选：滚轮左右滑（鼠标在视口上时）
             panelSkinViewport.MouseWheel -= PanelSkinViewport_MouseWheel;
             panelSkinViewport.MouseWheel += PanelSkinViewport_MouseWheel;
 
@@ -110,12 +125,7 @@ namespace League.ChampionSkin
 
         public void Bind(ChampionSkinCardModel model)
         {
-            if (model == null) return;
-            if (picHero == null)
-            {
-                Debug.WriteLine("[ChampionSkinCard] picHero 为 null，检查 Designer");
-                return;
-            }
+            if (model == null || picHero == null) return;
 
             _championId = model.ChampionId;
             _defaultSkinId = model.DefaultSkinId;
@@ -127,11 +137,57 @@ namespace League.ChampionSkin
             _selectedSkinId = prefOk ? model.PreferredSkinId : model.DefaultSkinId;
 
             picHero.Image = null;
-            LoadHeroIcon(model);
-            BuildSkinThumbs(model.Skins);
+            picHero.BackColor = Color.FromArgb(20, 20, 20);
+
+            // 只建格子结构，不读盘
+            BuildSkinThumbsShell(model.Skins);
             ApplySelectionHighlight();
-            ApplyHeroPreview();
             Tag = model.ChampionId;
+        }
+
+        /// <summary>只创建 50x50 空壳，不解码图片。</summary>
+        private void BuildSkinThumbsShell(List<SkinThumbItem>? skins)
+        {
+            ClearSkinFrames();
+            if (skins == null || skins.Count == 0)
+            {
+                UpdateSkinArrows(0);
+                return;
+            }
+
+            var tip = new ToolTip { InitialDelay = 50, ReshowDelay = 50, AutoPopDelay = 5000 };
+
+            foreach (var s in skins)
+            {
+                bool isBase = s.IsBase || (s.SkinId % 1000 == 0);
+                var frame = new Panel
+                {
+                    Width = ThumbSize,
+                    Height = ThumbSize,
+                    Margin = new Padding(2),
+                    Padding = new Padding(2),
+                    BackColor = SkinFrameNormal,
+                    Tag = s
+                };
+                var box = new PictureBox
+                {
+                    Dock = DockStyle.Fill,
+                    SizeMode = PictureBoxSizeMode.Zoom,
+                    BorderStyle = BorderStyle.None,
+                    Cursor = Cursors.Hand,
+                    BackColor = Color.FromArgb(30, 30, 30),
+                    Tag = s
+                };
+                tip.SetToolTip(box, string.IsNullOrEmpty(s.Name)
+                    ? (isBase ? "默认" : s.SkinId.ToString())
+                    : s.Name);
+
+                box.Click += SkinBox_Click;
+                frame.Click += (_, _) => SkinBox_Click(box, EventArgs.Empty);
+                frame.Controls.Add(box);
+                flpSkins.Controls.Add(frame);
+            }
+            ResetSkinScroll();
         }
 
         public void RefreshPreference(int preferredSkinId)
@@ -144,32 +200,7 @@ namespace League.ChampionSkin
 
         #endregion
 
-        #region 英雄大图
-
-        private void LoadHeroIcon(ChampionSkinCardModel model)
-        {
-            if (picHero == null || _cache == null) return;
-
-            var img = _cache.GetOrLoad($"hero:{model.ChampionId}", () =>
-            {
-                string dir = Path.Combine(Application.StartupPath, "Assets", "champion");
-                foreach (var p in new[]
-                {
-                    Path.Combine(dir, $"{model.ChampionId}.png"),
-                    Path.Combine(dir, $"{(model.Name ?? "").Replace(" ", "").Replace("'", "")}.png"),
-                    Path.Combine(dir, $"{model.Alias}.png"),
-                })
-                {
-                    var scaled = SkinBrowserImageCache.LoadScaledFromFile(p, 150, 150);
-                    if (scaled != null) return scaled;
-                }
-                return null;
-            });
-
-            if (img == null) return;
-            picHero.SizeMode = PictureBoxSizeMode.Zoom;
-            picHero.Image = img;
-        }
+        #region 英雄大图（统一 PreviewW x PreviewH）
 
         public void SetHeroImage(Image? image)
         {
@@ -179,121 +210,78 @@ namespace League.ChampionSkin
                 BeginInvoke(() => SetHeroImage(image));
                 return;
             }
+
+            // 已有皮肤预览就别用头像盖掉
             if (picHero.Image != null) return;
+            if (FindSkinFile(_selectedSkinId > 0 ? _selectedSkinId : _defaultSkinId) != null)
+                return;
 
-            if (_cache != null)
-            {
-                var img = _cache.GetOrLoad($"hero:{_championId}",
-                    () => SkinBrowserImageCache.Scale(image, 150, 150));
-                picHero.SizeMode = PictureBoxSizeMode.Zoom;
-                picHero.Image = img;
-            }
-            else
-            {
-                picHero.SizeMode = PictureBoxSizeMode.Zoom;
-                picHero.Image = (Image)image.Clone();
-            }
+            // 可选：完全不把头像设进主预览，直接 return;
+            // return;
 
-            if (_selectedSkinId % 1000 == 0)
-                ApplyHeroPreview();
+            // 若仍想极弱占位，可保留缩放头像；更建议直接 return 保持深色底
         }
 
         private void ApplyHeroPreview()
         {
-            if (picHero == null) return;
+            if (picHero == null || _cache == null) return;
 
-            bool useSkin = _selectedSkinId > 0 && _selectedSkinId % 1000 != 0;
-            if (useSkin && _cache != null)
+            int previewSkinId = (_selectedSkinId > 0 && _selectedSkinId % 1000 != 0)
+                ? _selectedSkinId
+                : _defaultSkinId;
+
+            // 内存有图：只设引用，不解码 → 不卡拖动
+            var hit = _cache.Get($"skin:{previewSkinId}:{PreviewW}x{PreviewH}");
+            if (hit != null)
             {
-                string? path = FindSkinFile(_selectedSkinId);
-                if (path != null)
-                {
-                    var skinImg = _cache.GetOrLoad($"skin:{_selectedSkinId}:150", () =>
-                        SkinBrowserImageCache.LoadScaledFromFile(path, 150, 150));
-                    if (skinImg != null)
-                    {
-                        picHero.SizeMode = PictureBoxSizeMode.Zoom;
-                        picHero.Image = skinImg;
-                        return;
-                    }
-                }
+                picHero.SizeMode = PictureBoxSizeMode.Zoom;
+                picHero.Image = hit;
+                return;
             }
 
-            picHero.Image = _cache?.Get($"hero:{_championId}");
+            string? path = FindSkinFile(previewSkinId);
+            if (path == null)
+            {
+                picHero.Image = null;
+                return;
+            }
+
+            // 未命中：后台解码，避免 UI 卡顿
+            string pathCopy = path;
+            int id = previewSkinId;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                Image? img = null;
+                try
+                {
+                    img = SkinBrowserImageCache.LoadCroppedFromFile(pathCopy, PreviewW, PreviewH)
+                       ?? SkinBrowserImageCache.LoadScaledFromFile(pathCopy, PreviewW, PreviewH);
+                }
+                catch { return; }
+                if (img == null) return;
+
+                try
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        if (IsDisposed || picHero == null) return;
+                        int cur = (_selectedSkinId > 0 && _selectedSkinId % 1000 != 0)
+                            ? _selectedSkinId : _defaultSkinId;
+                        if (cur != id) return;
+
+                        var toUse = _cache?.GetOrLoad(
+                            $"skin:{id}:{PreviewW}x{PreviewH}", () => img) ?? img;
+                        picHero.SizeMode = PictureBoxSizeMode.Zoom;
+                        picHero.Image = toUse;
+                    }));
+                }
+                catch { }
+            });
         }
 
         #endregion
 
         #region 皮肤小格
-
-        private void BuildSkinThumbs(List<SkinThumbItem>? skins)
-        {
-            ClearSkinFrames();
-            if (skins == null || skins.Count == 0)
-            {
-                UpdateSkinArrows(0);
-                return;
-            }
-
-            string champDir = Path.Combine(Application.StartupPath, "Assets", "champion");
-            var tip = new ToolTip { InitialDelay = 50, ReshowDelay = 50, AutoPopDelay = 5000 };
-
-            foreach (var s in skins)
-            {
-                bool isBase = s.IsBase || (s.SkinId % 1000 == 0);
-                var frame = new Panel
-                {
-                    Width = 28,
-                    Height = 28,
-                    Margin = new Padding(1),
-                    Padding = new Padding(2),
-                    BackColor = Color.FromArgb(50, 50, 50),
-                    Tag = s
-                };
-                var box = new PictureBox
-                {
-                    Dock = DockStyle.Fill,
-                    SizeMode = PictureBoxSizeMode.Zoom,
-                    BorderStyle = BorderStyle.None,
-                    Cursor = Cursors.Hand,
-                    BackColor = Color.FromArgb(30, 30, 30),
-                    Tag = s
-                };
-
-                tip.SetToolTip(box, string.IsNullOrEmpty(s.Name)
-                    ? (isBase ? "默认" : s.SkinId.ToString())
-                    : s.Name);
-
-                if (isBase && _cache != null)
-                {
-                    box.Image = _cache.GetOrLoad($"hero:{_championId}:31", () =>
-                    {
-                        var full = _cache.Get($"hero:{_championId}");
-                        if (full != null)
-                            return SkinBrowserImageCache.Scale(full, 31, 31);
-                        return SkinBrowserImageCache.LoadScaledFromFile(
-                            Path.Combine(champDir, $"{_championId}.png"), 31, 31);
-                    });
-                }
-                else if (_cache != null)
-                {
-                    box.Image = _cache.GetOrLoad($"skin:{s.SkinId}:31", () =>
-                    {
-                        string? p = FindSkinFile(s.SkinId);
-                        return p == null
-                            ? null
-                            : SkinBrowserImageCache.LoadScaledFromFile(p, 31, 31);
-                    });
-                }
-
-                box.Click += SkinBox_Click;
-                frame.Click += (_, _) => SkinBox_Click(box, EventArgs.Empty);
-                frame.Controls.Add(box);
-                flpSkins.Controls.Add(frame);
-            }
-            // 加完后复位滚动并更新箭头
-            ResetSkinScroll();
-        }
 
         /// <summary>
         /// direction: -1 内容向右移（看左边），+1 内容向左移（看右边）
@@ -302,7 +290,7 @@ namespace League.ChampionSkin
         {
             if (flpSkins == null || panelSkinViewport == null) return;
 
-            const int step = 64; // 大约两格
+            const int step = 110;
             int contentW = Math.Max(flpSkins.Width, flpSkins.PreferredSize.Width);
             int viewW = panelSkinViewport.Width;
             int max = Math.Max(0, contentW - viewW);
@@ -326,7 +314,6 @@ namespace League.ChampionSkin
             btnSkinRight.Enabled = need && flpSkins.Left > -maxScroll;
         }
 
-        /// <summary>格子加完后复位并刷新箭头</summary>
         private void ResetSkinScroll()
         {
             if (flpSkins == null) return;
@@ -337,11 +324,10 @@ namespace League.ChampionSkin
                 flpSkins.Left = 0;
                 flpSkins.PerformLayout();
 
-                // AutoSize 有时 Width 仍为 0，用 PreferredSize 兜底
                 int w = flpSkins.PreferredSize.Width;
                 if (w > 0)
                     flpSkins.Width = w;
-                flpSkins.Height = 40;
+                flpSkins.Height = ThumbSize + 8;
             }
             finally
             {
@@ -360,7 +346,7 @@ namespace League.ChampionSkin
             {
                 if (c is not Panel frame || frame.Tag is not SkinThumbItem item) continue;
                 frame.BackColor = SkinFrameNormal;
-                frame.Padding = new Padding(1);
+                frame.Padding = new Padding(2);
                 if (item.SkinId == _selectedSkinId) target = frame;
                 if (item.IsBase || item.SkinId % 1000 == 0) baseFrame = frame;
             }
@@ -369,8 +355,8 @@ namespace League.ChampionSkin
             if (target == null) return;
 
             _selectedFrame = target;
-            target.Padding = new Padding(3);          // 加粗
-            target.BackColor = SkinFrameSelected;     // 亮红
+            target.Padding = new Padding(3);
+            target.BackColor = SkinFrameSelected;
             if (target.Tag is SkinThumbItem it)
                 _selectedSkinId = it.SkinId;
         }
@@ -389,7 +375,7 @@ namespace League.ChampionSkin
                     if (c is Panel p)
                     {
                         p.BackColor = SkinFrameNormal;
-                        p.Padding = new Padding(1);
+                        p.Padding = new Padding(2);
                     }
                 }
                 frame.BackColor = SkinFrameSelected;
@@ -397,23 +383,24 @@ namespace League.ChampionSkin
             }
 
             bool isBase = item.IsBase || item.SkinId % 1000 == 0;
-            if (isBase)
+
+            if (_cache != null)
             {
-                picHero.Image = _cache?.Get($"hero:{_championId}");
-                PreferredSkinChanged?.Invoke(_championId, 0);
-            }
-            else
-            {
-                if (_cache != null)
+                string? path = FindSkinFile(item.SkinId);
+                if (path != null)
                 {
-                    string? path = FindSkinFile(item.SkinId);
-                    picHero.Image = path == null
-                        ? null
-                        : _cache.GetOrLoad($"skin:{item.SkinId}:150", () =>
-                            SkinBrowserImageCache.LoadScaledFromFile(path, 150, 150));
+                    picHero.Image = _cache.GetOrLoad(
+                        $"skin:{item.SkinId}:{PreviewW}x{PreviewH}",
+                        () => SkinBrowserImageCache.LoadCroppedFromFile(path, PreviewW, PreviewH)
+                           ?? SkinBrowserImageCache.LoadScaledFromFile(path, PreviewW, PreviewH));
                 }
-                PreferredSkinChanged?.Invoke(_championId, item.SkinId);
+                else
+                {
+                    picHero.Image = null;
+                }
             }
+
+            PreferredSkinChanged?.Invoke(_championId, isBase ? 0 : item.SkinId);
         }
 
         public void SetSkinImage(int skinId, Image? image)
@@ -425,33 +412,33 @@ namespace League.ChampionSkin
                 return;
             }
 
-            Image? thumb = _cache != null
-                ? _cache.GetOrLoad($"skin:{skinId}:31",
-                    () => SkinBrowserImageCache.Scale(image, 31, 31))
-                : SkinBrowserImageCache.Scale(image, 31, 31);
+            var thumb = _cache != null
+                ? _cache.GetOrLoad($"skin:{skinId}:{ThumbSize}",
+                    () => SkinBrowserImageCache.CropScale(image, ThumbSize, ThumbSize)
+                       ?? SkinBrowserImageCache.Scale(image, ThumbSize, ThumbSize))
+                : image;
 
             foreach (Control c in flpSkins.Controls)
             {
                 if (c is not Panel frame || frame.Tag is not SkinThumbItem item) continue;
                 if (item.SkinId != skinId) continue;
-
                 if (frame.Controls.Count > 0 && frame.Controls[0] is PictureBox pb)
                     pb.Image = thumb;
-
-                if (_selectedSkinId == skinId && _cache != null)
-                {
-                    string? path = FindSkinFile(skinId);
-                    picHero.Image = _cache.GetOrLoad($"skin:{skinId}:150", () =>
-                    {
-                        if (path != null)
-                        {
-                            var fromFile = SkinBrowserImageCache.LoadScaledFromFile(path, 150, 150);
-                            if (fromFile != null) return fromFile;
-                        }
-                        return SkinBrowserImageCache.Scale(image, 150, 150);
-                    });
-                }
                 break;
+            }
+
+            if (skinId != _selectedSkinId || _cache == null) return;
+
+            // 大图已在内存：同步显示；否则后台 ApplyHeroPreview，不在这里解码
+            var preview = _cache.Get($"skin:{skinId}:{PreviewW}x{PreviewH}");
+            if (preview != null)
+            {
+                picHero.SizeMode = PictureBoxSizeMode.Zoom;
+                picHero.Image = preview;
+            }
+            else
+            {
+                ApplyHeroPreview(); // 内部走 ThreadPool
             }
         }
 

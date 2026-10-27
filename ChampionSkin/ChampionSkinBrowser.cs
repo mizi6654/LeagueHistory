@@ -29,20 +29,20 @@ namespace League.ChampionSkin
         private System.Windows.Forms.Timer? _searchDebounce;
         private CancellationTokenSource? _loadCts;
 
-        private readonly SemaphoreSlim _skinDownloadLock = new(2, 2);
+        private readonly SemaphoreSlim _skinDownloadLock = new(8, 8);
 
-        /// <summary>
-        /// 缓存图最长边（接近头像 128，控制体积）。
-        /// 还想更清楚：256 + 88；
-        /// 还想体积更小：160 + 80。、128x80
-        /// </summary>
-        private const int SkinCacheMaxEdge = 256;
+        /// <summary>250×360 裁切预览用 560～600 一般够；再低可能略糊。千皮肤约几十 MB。</summary>
+        private const int SkinCacheMaxEdge = 560;
 
-        /// <summary>JPEG 质量，可调 70～85。</summary>
-        private const long JpegQuality = 80L;
+        /// <summary>JPEG 质量 70～78 更省空间。</summary>
+        private const long JpegQuality = 85L;
 
         /// <summary>同一 skinId 同时只允许一条下载，避免 Move 冲突。</summary>
         private readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> _skinIdLocks = new();
+
+        private readonly object _pendingUiLock = new();
+        private readonly List<Action> _pendingUi = new();
+        private System.Windows.Forms.Timer? _uiFlushTimer;
 
         #endregion
 
@@ -51,6 +51,19 @@ namespace League.ChampionSkin
         public ChampionSkinBrowser(LeagueConfig config)
         {
             InitializeComponent();
+
+            typeof(Control).GetProperty("DoubleBuffered",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(flpCards, true);
+
+            // 窗体可选
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            UpdateStyles();
+
+            _uiFlushTimer = new System.Windows.Forms.Timer { Interval = 120 };
+            _uiFlushTimer.Tick += (_, _) => FlushPendingUi();
+            _uiFlushTimer.Start();
+
             _config = config ?? throw new ArgumentNullException(nameof(config));
 
             if (txtSearch != null)
@@ -206,12 +219,15 @@ namespace League.ChampionSkin
 
                 _dataReady = true;
                 HighlightPositionButton(btnAll);
-                EnsureCardPool();
-                ApplyFilterAndRender(); // 内部仍会 Suspend/Resume
+                EnsureCardPool();          // 只建空壳
+                ApplyFilterAndRender();    // 显示可见卡，发起本地上图（不 await 下载）
 
                 flpCards.ResumeLayout(true);
-                flpCards.Visible = true;  // 只露一次，已有同步读到的本地图
+                flpCards.Visible = true;
+                SetBusy(false);            // 立刻结束转圈 —— 必须在 Preload 之前
 
+                _ = LoadSkinThumbsAsync();
+                // 纯后台，不要 await
                 _ = PreloadAllOwnedSkinImagesAsync(ownedSkinsByChamp, token);
             }
             catch (Exception ex)
@@ -260,9 +276,14 @@ namespace League.ChampionSkin
 
                     bool isBase = o["isBase"]?.Value<bool>() ?? (skinId % 1000 == 0);
                     string name = o["name"]?.ToString() ?? (isBase ? "默认" : skinId.ToString());
-                    string? tilePath = o["tilePath"]?.ToString()
-                        ?? o["tileUrl"]?.ToString()
-                        ?? o["splashPath"]?.ToString();
+
+                    // 优先 splash / loadScreen，避免先拿到方图 tile
+                    string? assetPath =
+                        o["splashPath"]?.ToString()
+                        ?? o["uncenteredSplashPath"]?.ToString()
+                        ?? o["loadScreenPath"]?.ToString()
+                        ?? o["tilePath"]?.ToString()
+                        ?? o["tileUrl"]?.ToString();
 
                     if (!result.TryGetValue(champId, out var list))
                     {
@@ -276,7 +297,7 @@ namespace League.ChampionSkin
                         SkinId = skinId,
                         Name = name,
                         IsBase = isBase,
-                        TilePath = string.IsNullOrWhiteSpace(tilePath) ? null : tilePath.Trim()
+                        TilePath = string.IsNullOrWhiteSpace(assetPath) ? null : assetPath.Trim()
                     });
                 }
 
@@ -340,10 +361,13 @@ namespace League.ChampionSkin
                         return c != null && c.GetPositions().Contains(_currentPosition);
                     });
                 }
+
                 if (ownedOnly)
                     q = q.Where(m => m.IsOwned);
+
                 if (hasSkinOnly)
                     q = q.Where(m => m.Skins.Any(s => !s.IsBase && s.SkinId % 1000 != 0));
+
                 if (!string.IsNullOrEmpty(keyword))
                 {
                     q = q.Where(m =>
@@ -353,18 +377,25 @@ namespace League.ChampionSkin
                 }
 
                 var list = q.OrderBy(m => m.Name).ToList();
+                var wantIds = new HashSet<int>(list.Select(m => m.ChampionId));
 
                 flpCards.SuspendLayout();
                 try
                 {
-                    foreach (var card in _cardPool.Values)
-                        card.Visible = false;
+                    // 只改 Visible 真正变化的卡，避免对上百张重复赋值触发布局
+                    foreach (var kv in _cardPool)
+                    {
+                        var card = kv.Value;
+                        bool show = wantIds.Contains(kv.Key);
+                        if (card.Visible != show)
+                            card.Visible = show;
+                    }
 
+                    // 按筛选结果排序（FlowLayoutPanel 按 Controls 顺序排）
                     int index = 0;
                     foreach (var model in list)
                     {
                         if (!_cardPool.TryGetValue(model.ChampionId, out var card)) continue;
-                        card.Visible = true;
                         flpCards.Controls.SetChildIndex(card, index++);
                     }
                 }
@@ -376,6 +407,7 @@ namespace League.ChampionSkin
                 int withSkin = list.Count(m => m.Skins.Any(s => !s.IsBase && s.SkinId % 1000 != 0));
                 lblStats.Text = $"共 {list.Count} 英雄，其中 {withSkin} 个有皮肤";
 
+                // 异步补图，不要 await
                 _ = LoadHeroIconsAsync();
                 _ = LoadSkinThumbsAsync();
             }
@@ -454,11 +486,12 @@ namespace League.ChampionSkin
 
         private async Task LoadSkinThumbsAsync()
         {
-            var http = Globals.lcuClient.Client;
-            if (http == null) return;
-
             string cacheDir = SkinCacheDir;
-            Directory.CreateDirectory(cacheDir);
+            if (!Directory.Exists(cacheDir))
+                Directory.CreateDirectory(cacheDir);
+
+            // UI 线程收集可见卡，避免跨线程碰 Controls
+            var jobs = new List<(ChampionSkinCard card, int skinId, string path, bool isPreview)>();
 
             foreach (Control c in flpCards.Controls)
             {
@@ -468,49 +501,121 @@ namespace League.ChampionSkin
                 var model = _allModels.FirstOrDefault(m => m.ChampionId == champId);
                 if (model == null) continue;
 
+                int previewId = model.PreferredSkinId > 0 && model.PreferredSkinId % 1000 != 0
+                    ? model.PreferredSkinId
+                    : model.DefaultSkinId;
+
                 foreach (var skin in model.Skins)
                 {
-                    if (skin.IsBase || skin.SkinId % 1000 == 0) continue;
-
                     string? path = ResolveSkinFile(cacheDir, skin.SkinId);
-                    if (path == null)
-                    {
-                        await EnsureSkinFileCachedAsync(
-                            http, cacheDir, champId, skin.SkinId, skin.TilePath);
-                        path = ResolveSkinFile(cacheDir, skin.SkinId);
-                    }
-
-                    if (path == null || card.IsDisposed) continue;
-
-                    void apply()
-                    {
-                        try { ApplySkinFileToCard(card, skin.SkinId, path!); }
-                        catch (ArgumentException) { }
-                    }
-
-                    if (card.IsDisposed) continue;
-                    if (card.InvokeRequired)
-                        card.BeginInvoke(apply);
-                    else
-                        apply();
+                    if (path == null) continue;
+                    jobs.Add((card, skin.SkinId, path, skin.SkinId == previewId));
                 }
             }
+
+            if (jobs.Count == 0)
+            {
+                //Debug.WriteLine("[皮肤图] LoadSkinThumbsAsync: 可见卡无本地皮肤文件");
+                return;
+            }
+
+            //Debug.WriteLine($"[皮肤图] LoadSkinThumbsAsync: 本地待上图 {jobs.Count} 个");
+
+            await Task.Run(() =>
+            {
+                // 按 card 分组，每张卡只进 UI 一次
+                foreach (var group in jobs.GroupBy(j => j.card))
+                {
+                    var card = group.Key;
+                    if (card.IsDisposed) continue;
+
+                    var thumbPairs = new List<(int skinId, Image img)>();
+                    bool needPreview = false;
+                    int previewSkinId = 0;
+
+                    foreach (var job in group)
+                    {
+                        var thumb = _imgCache.GetOrLoad($"skin:{job.skinId}:50", () =>
+                            SkinBrowserImageCache.LoadCroppedFromFile(job.path, 50, 50)
+                            ?? SkinBrowserImageCache.LoadScaledFromFile(job.path, 50, 50));
+                        if (thumb != null)
+                            thumbPairs.Add((job.skinId, thumb));
+
+                        if (job.isPreview)
+                        {
+                            needPreview = true;
+                            previewSkinId = job.skinId;
+                            // 后台先解大图进缓存
+                            _imgCache.GetOrLoad($"skin:{job.skinId}:250x360", () =>
+                                SkinBrowserImageCache.LoadCroppedFromFile(job.path, 250, 360)
+                                ?? SkinBrowserImageCache.LoadScaledFromFile(job.path, 250, 360));
+                        }
+                    }
+
+                    var pairs = thumbPairs;
+                    var cardRef = card;
+                    var prev = needPreview;
+                    EnqueueUi(() =>
+                    {
+                        if (cardRef.IsDisposed) return;
+                        foreach (var (skinId, img) in pairs)
+                            cardRef.SetSkinImage(skinId, img);
+                        if (prev)
+                            cardRef.RefreshPreviewFromDisk(); // 此时几乎必命中缓存
+                    });
+                }
+            }).ConfigureAwait(true);
         }
 
+        // ApplySkinFileToCard 改为异步解码示例（可选优化）
         private void ApplySkinFileToCard(ChampionSkinCard card, int skinId, string path)
         {
             if (card.IsDisposed || !IsValidSkinFile(path)) return;
 
-            var img = _imgCache.GetOrLoad($"skin:{skinId}:31", () =>
-                SkinBrowserImageCache.LoadScaledFromFile(path, 31, 31));
-            if (img != null)
-                card.SetSkinImage(skinId, img);
+            // 已在内存则直接用
+            var cached = _imgCache.Get($"skin:{skinId}:50");
+            if (cached != null)
+            {
+                card.SetSkinImage(skinId, cached);
+                return;
+            }
+
+            string pathCopy = path;
+            int id = skinId;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                Image? img = null;
+                try
+                {
+                    img = SkinBrowserImageCache.LoadCroppedFromFile(pathCopy, 50, 50)
+                       ?? SkinBrowserImageCache.LoadScaledFromFile(pathCopy, 50, 50);
+                }
+                catch { return; }
+
+                if (img == null || card.IsDisposed) return;
+                try
+                {
+                    EnqueueUi(() =>
+                    {
+                        if (card.IsDisposed) return;
+                        var toUse = _imgCache.GetOrLoad($"skin:{id}:50", () => img);
+                        card.SetSkinImage(id, toUse ?? img);
+                    });
+                }
+                catch { }
+            });
         }
 
         private async Task PreloadAllOwnedSkinImagesAsync(
             Dictionary<int, List<SkinThumbItem>> owned,
             CancellationToken token)
         {
+            if (!IsDisposed && IsHandleCreated)
+            {
+                try { BeginInvoke(new Action(() => _ = LoadSkinThumbsAsync())); }
+                catch { }
+            }
+
             var http = Globals.lcuClient.Client;
             if (http == null) return;
 
@@ -518,39 +623,57 @@ namespace League.ChampionSkin
             Directory.CreateDirectory(cacheDir);
             CleanupCorruptSkinCache(cacheDir);
 
-            int done = 0, fail = 0;
-            foreach (var (champId, list) in owned)
+            var jobs = new List<(int champId, int skinId, string? tilePath)>();
+            foreach (var model in _allModels)
             {
-                if (token.IsCancellationRequested) break;
-                foreach (var s in list)
+                if (!model.IsOwned) continue;
+                foreach (var s in model.Skins)
                 {
-                    if (token.IsCancellationRequested) break;
-                    if (s.IsBase || s.SkinId % 1000 == 0) continue;
-
-                    if (ResolveSkinFile(cacheDir, s.SkinId) != null)
-                    {
-                        done++;
-                        continue;
-                    }
-
-                    try
-                    {
-                        bool ok = await EnsureSkinFileCachedAsync(
-                            http, cacheDir, champId, s.SkinId, s.TilePath);
-                        if (ok) done++;
-                        else fail++;
-                    }
-                    catch { fail++; }
+                    if (ResolveSkinFile(cacheDir, s.SkinId) != null) continue;
+                    jobs.Add((model.ChampionId, s.SkinId, s.TilePath));
                 }
             }
 
-            Debug.WriteLine($"[皮肤图] 预缓存结束 ok≈{done} fail={fail}");
-
-            if (!IsDisposed && IsHandleCreated)
+            int done = 0, fail = 0;
+            await Task.WhenAll(jobs.Select(async job =>
             {
-                try { BeginInvoke(new Action(() => _ = LoadSkinThumbsAsync())); }
-                catch { }
-            }
+                if (token.IsCancellationRequested) return;
+                try
+                {
+                    bool ok = await EnsureSkinFileCachedAsync(
+                        http, cacheDir, job.champId, job.skinId, job.tilePath)
+                        .ConfigureAwait(false);
+                    if (ok)
+                    {
+                        Interlocked.Increment(ref done);
+                        // 每成功一张，尝试刷新可见 UI（不整表重扫也可）
+                        NotifySkinFileReady(job.champId, job.skinId);
+                    }
+                    else Interlocked.Increment(ref fail);
+                }
+                catch { Interlocked.Increment(ref fail); }
+            })).ConfigureAwait(false);
+
+            Debug.WriteLine($"[皮肤图] 预缓存结束 ok≈{done} fail={fail}");
+            EnqueueUi(() => _ = LoadSkinThumbsAsync());
+        }
+
+        private void NotifySkinFileReady(int championId, int skinId)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            EnqueueUi(() =>
+            {
+                if (!_cardPool.TryGetValue(championId, out var card)) return;
+                if (card.IsDisposed || !card.Visible) return;
+
+                string? path = ResolveSkinFile(SkinCacheDir, skinId);
+                if (path == null) return;
+
+                ApplySkinFileToCard(card, skinId, path);
+                // 仅更新小格；大图等本批 Flush 后按需，或下面按选中判断
+                // 若要刷大图，至少避免每张 skin 都 Refresh：
+                // card.RefreshPreviewFromDisk();
+            });
         }
 
         #endregion
@@ -562,9 +685,9 @@ namespace League.ChampionSkin
         string cacheDir,
         int championId,
         int skinId,
-        string? tilePathFromApi = null)
+        string? tilePathFromApi = null,
+        string? loadingScreenPath = null)
         {
-            // 已有有效文件直接成功
             if (ResolveSkinFile(cacheDir, skinId) != null)
                 return true;
 
@@ -572,7 +695,6 @@ namespace League.ChampionSkin
             await idLock.WaitAsync().ConfigureAwait(false);
             try
             {
-                // 双检：等锁期间可能已被别的任务写好
                 if (ResolveSkinFile(cacheDir, skinId) != null)
                     return true;
 
@@ -586,18 +708,21 @@ namespace League.ChampionSkin
                     int baseSkinId = championId * 1000;
                     var lcuPaths = new List<string>();
 
+                    // API 给的优先（且不是 tile）
                     if (!string.IsNullOrWhiteSpace(tilePathFromApi))
                     {
                         var p = tilePathFromApi.Trim();
                         if (!p.StartsWith("/")) p = "/" + p;
-                        lcuPaths.Add(p);
+                        if (p.IndexOf("champion-tiles", StringComparison.OrdinalIgnoreCase) < 0)
+                            lcuPaths.Add(p);
                     }
 
+                    // 标准 splash（原皮 skinId = champId*1000 同样适用）
+                    lcuPaths.Add($"/lol-game-data/assets/v1/champion-splashes/{championId}/{skinId}.jpg");
+                    lcuPaths.Add($"/lol-game-data/assets/v1/champion-splashes/uncentered/{championId}/{skinId}.jpg");
+
+                    // 仅一张 tile 兜底
                     lcuPaths.Add($"/lol-game-data/assets/v1/champion-tiles/{championId}/{skinId}.jpg");
-                    lcuPaths.Add($"/lol-game-data/assets/v1/champion-splashes/{skinId}.jpg");
-                    lcuPaths.Add($"/lol-game-data/assets/v1/champion-splashes/uncentered/{skinId}.jpg");
-                    if (skinId != baseSkinId)
-                        lcuPaths.Add($"/lol-game-data/assets/v1/champion-tiles/{championId}/{baseSkinId}.jpg");
 
                     foreach (var path in lcuPaths.Distinct(StringComparer.OrdinalIgnoreCase))
                     {
@@ -605,13 +730,13 @@ namespace League.ChampionSkin
                         if (bytes == null) continue;
                         if (SaveBytesAsCachedJpeg(bytes, cachePath))
                             return true;
-                        // 写失败但文件已出现（别的线程写完）也算成功
                         if (ResolveSkinFile(cacheDir, skinId) != null)
                             return true;
                     }
 
-                    // 兜底：英雄头占位（可选，避免黑格）
-                    string champIcon = Path.Combine(Application.StartupPath, "Assets", "champion", $"{championId}.png");
+                    // 兜底：英雄头（仅占位，避免黑格）
+                    string champIcon = Path.Combine(
+                        Application.StartupPath, "Assets", "champion", $"{championId}.png");
                     if (File.Exists(champIcon))
                     {
                         try
@@ -822,8 +947,11 @@ namespace League.ChampionSkin
                 _searchDebounce?.Stop();
                 _searchDebounce?.Dispose();
                 _searchDebounce = null;
-
                 _loadCts?.Cancel();
+
+                _uiFlushTimer?.Stop();
+                _uiFlushTimer?.Dispose();
+                _uiFlushTimer = null;
 
                 // 解绑即可，不要在这里 Controls.Clear / 逐张 Dispose
                 foreach (var card in _cardPool.Values)
@@ -851,5 +979,28 @@ namespace League.ChampionSkin
         }
 
         #endregion
+
+        private void EnqueueUi(Action action)
+        {
+            if (IsDisposed || action == null) return;
+            lock (_pendingUiLock)
+                _pendingUi.Add(action);
+        }
+
+        private void FlushPendingUi()
+        {
+            if (IsDisposed) return;
+            List<Action> batch;
+            lock (_pendingUiLock)
+            {
+                if (_pendingUi.Count == 0) return;
+                batch = new List<Action>(_pendingUi);
+                _pendingUi.Clear();
+            }
+            foreach (var a in batch)
+            {
+                try { a(); } catch { }
+            }
+        }
     }
 }
