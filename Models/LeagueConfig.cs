@@ -109,5 +109,11 @@ namespace League.Models
         /// 快捷键游戏内发送全队，默认 F11
         /// </summary>
         public string HotkeyFullTeam { get; set; } = "F11";
+
+        /// <summary>
+        /// 日志保留天数（日常 .log 和 hidden_*.json 都会清理）
+        /// 小于等于 0 表示不自动清理
+        /// </summary>
+        public int LogRetentionDays { get; set; } = 7;
     }
 }

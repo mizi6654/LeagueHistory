@@ -4,17 +4,21 @@
     {
         private Label lblStatus;
         private ProgressBar pbProgress;
+        private string _sourceName = "Gitee / GitHub";
 
-        public ProgressForm()
+        public ProgressForm(string sourceName = null)
         {
+            if (!string.IsNullOrEmpty(sourceName))
+                _sourceName = sourceName;
+
             InitializeComponent();
 
-            // 窗体创建时立即设置完整的初始提示（多行、醒目）
-            lblStatus.Text = "正在从 GitHub 下载更新包...\r\n" +
+            // 初始提示（动态显示来源）
+            lblStatus.Text = $"正在从 {_sourceName} 下载更新包...\r\n" +
                              "(网络环境不同，下载速度可能较慢，请耐心等待)\r\n" +
                              "请勿关闭此窗口";
             lblStatus.AutoSize = false;
-            lblStatus.Size = new Size(520, 120);  // 高度足够容纳三行
+            lblStatus.Size = new Size(520, 120);
             lblStatus.TextAlign = ContentAlignment.MiddleLeft;
             lblStatus.Font = new Font("Microsoft YaHei", 11F, FontStyle.Regular);
         }
@@ -22,7 +26,7 @@
         private void InitializeComponent()
         {
             this.Text = "更新中...";
-            this.Size = new Size(580, 260);  // 保持较大尺寸
+            this.Size = new Size(580, 260);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -38,7 +42,7 @@
 
             pbProgress = new ProgressBar
             {
-                Location = new Point(30, 160),  // 下移，避免与文字重叠
+                Location = new Point(30, 160),
                 Size = new Size(520, 40),
                 Style = ProgressBarStyle.Marquee,
                 MarqueeAnimationSpeed = 40
@@ -46,7 +50,6 @@
             this.Controls.Add(pbProgress);
         }
 
-        // CenterToOwner 和 OnLoad 保持不变
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
@@ -75,10 +78,6 @@
                 return;
             }
 
-            // 每条消息都带 GitHub 前缀（防止丢失信息）
-            if (!message.Contains("GitHub"))
-                message = "从 GitHub " + message;
-
             lblStatus.Text = message;
 
             if (percent.HasValue)
@@ -90,12 +89,14 @@
             {
                 pbProgress.Style = ProgressBarStyle.Marquee;
             }
+
             this.Refresh();
         }
 
         public void Complete(string message = "更新完成，正在重启...")
         {
             UpdateStatus(message, 100);
+
             Task.Delay(1500).ContinueWith(_ =>
             {
                 if (!this.IsDisposed)

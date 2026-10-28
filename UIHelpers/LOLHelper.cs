@@ -12,6 +12,7 @@ namespace League.UIHelpers
         {
             public string OfficialPath { get; set; }   // 默认启动路径（优先 Launcher\startup_runner.exe）
             public string WeGamePath { get; set; }     // WeGame 启动路径
+            public string InternationalPath { get; set; } // 外服 RiotClientServices.exe 路径
         }
 
         #region 配置读写
@@ -140,6 +141,65 @@ namespace League.UIHelpers
         public void StartWeGameClient() => StartProcess(GetWeGameLauncherPath());
 
         /// <summary>
+        /// 获取外服启动路径（RiotClientServices.exe）
+        /// </summary>
+        public string GetInternationalLauncherPath()
+        {
+            var config = LoadConfig();
+
+            // 1. 缓存有效则直接返回
+            if (!string.IsNullOrEmpty(config.InternationalPath) &&
+                File.Exists(config.InternationalPath) &&
+                IsValidInternationalLauncher(config.InternationalPath))
+            {
+                return config.InternationalPath;
+            }
+
+            // 2. 重新扫描
+            string found = SearchInternationalPath();
+            if (!string.IsNullOrEmpty(found))
+            {
+                config.InternationalPath = found;
+                SaveConfig(config);
+                Debug.WriteLine($"[LOLHelper] 搜索到外服启动路径并写入配置: {found}");
+                return found;
+            }
+
+            return null;
+        }
+
+        public void StartInternationalClient()
+        {
+            string path = GetInternationalLauncherPath();
+            if (string.IsNullOrEmpty(path)) return;
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = path,
+                    Arguments = "--launch-product=league_of_legends --launch-patchline=live",
+                    WorkingDirectory = Path.GetDirectoryName(path) ?? "",
+                    UseShellExecute = true
+                };
+                Process.Start(psi);
+                Debug.WriteLine($"[LOLHelper] 已启动外服: {path}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[LOLHelper] 启动外服异常: {ex.Message}");
+            }
+        }
+
+        public void SaveInternationalPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return;
+            var config = LoadConfig();
+            config.InternationalPath = path;
+            SaveConfig(config);
+        }
+
+        /// <summary>
         /// 强制重新搜索官方路径并覆盖配置（可供设置页「重新检测」按钮调用）
         /// </summary>
         public string ForceRefreshOfficialPath()
@@ -232,6 +292,36 @@ namespace League.UIHelpers
             return SearchFixedSubDirs(new[] { "WeGameLauncher" });
         }
 
+        private string SearchInternationalPath()
+        {
+            try
+            {
+                foreach (var drive in Directory.GetLogicalDrives())
+                {
+                    try
+                    {
+                        string[] candidates =
+                        {
+                            Path.Combine(drive, "Riot Games", "Riot Client", "RiotClientServices.exe"),
+                            Path.Combine(drive, "Games", "Riot Games", "Riot Client", "RiotClientServices.exe"),
+                            Path.Combine(drive, "Program Files", "Riot Games", "Riot Client", "RiotClientServices.exe"),
+                            Path.Combine(drive, "Program Files (x86)", "Riot Games", "Riot Client", "RiotClientServices.exe"),
+                        };
+
+                        foreach (var candidate in candidates)
+                        {
+                            if (File.Exists(candidate) && IsValidInternationalLauncher(candidate))
+                                return candidate;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
         private string SearchFixedSubDirs(string[] targetSubDirs)
         {
             try
@@ -262,7 +352,9 @@ namespace League.UIHelpers
             if (dirName is "windows" or "appdata" or "programdata" or
                           "documents and settings" or "$recycle.bin" or
                           "system volume information" or "recovery" or "perflogs" or
-                          "program files" or "program files (x86)")
+                          "program files" or "program files (x86)" or
+                          "msocache" or "intel" or "amd" or "nvidia" or
+                          "config.msi")
             {
                 return null;
             }
@@ -280,7 +372,14 @@ namespace League.UIHelpers
                     }
                 }
 
-                foreach (var dir in Directory.EnumerateDirectories(currentDir))
+                // ★ 关键：忽略无权限目录，不再抛 UnauthorizedAccessException
+                var options = new EnumerationOptions
+                {
+                    IgnoreInaccessible = true,
+                    RecurseSubdirectories = false
+                };
+
+                foreach (var dir in Directory.EnumerateDirectories(currentDir, "*", options))
                 {
                     string found = SearchDirectory(dir, targetSubDirs, maxDepth, currentDepth + 1);
                     if (!string.IsNullOrEmpty(found))
@@ -377,6 +476,36 @@ namespace League.UIHelpers
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// 验证是否是有效的外服 Riot Client 启动文件
+        /// （根据你提供的目录结构：必须有 RiotClientServices.exe + system.yaml）
+        /// </summary>
+        private bool IsValidInternationalLauncher(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+                return false;
+
+            if (!Path.GetFileName(exePath).Equals("RiotClientServices.exe", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            string dir = Path.GetDirectoryName(exePath);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+                return false;
+
+            // 核心特征：system.yaml 必须存在
+            if (!File.Exists(Path.Combine(dir, "system.yaml")))
+                return false;
+
+            // 结构辅助验证（提高准确性）
+            bool hasElectron = Directory.Exists(Path.Combine(dir, "RiotClientElectron"))
+                               && File.Exists(Path.Combine(dir, "RiotClientElectron", "Riot Client.exe"));
+
+            bool hasDll = File.Exists(Path.Combine(dir, "RiotClientFoundation.dll"))
+                          || File.Exists(Path.Combine(dir, "RiotGamesApi.dll"));
+
+            return hasElectron || hasDll;
         }
 
         #endregion

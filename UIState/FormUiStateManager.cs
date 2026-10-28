@@ -295,72 +295,174 @@ namespace League.UIState
             if (showLolLauncher)
             {
                 LOLHelper helper = new LOLHelper();
+
                 string officialPath = helper.GetOfficialLauncherPath();
                 string wegamePath = helper.GetWeGameLauncherPath();
+                string intlPath = helper.GetInternationalLauncherPath();
+
+                bool hasOfficial = !string.IsNullOrEmpty(officialPath);
+                bool hasWeGame = !string.IsNullOrEmpty(wegamePath);
+                bool hasIntl = !string.IsNullOrEmpty(intlPath);
+                bool hasChina = hasOfficial || hasWeGame;
+
+                // ===== 控件 =====
+                LinkLabel linkIntl = new LinkLabel
+                {
+                    AutoSize = true,
+                    Font = new Font("微软雅黑", 9.5f),
+                    Text = hasIntl ? intlPath : "未找到外服客户端",
+                    LinkColor = Color.DodgerBlue
+                };
+                Button btnIntl = new Button
+                {
+                    Text = "启动外服版",
+                    Width = 170,
+                    Height = 36,
+                    Enabled = hasIntl
+                };
 
                 LinkLabel linkOfficial = new LinkLabel
                 {
                     AutoSize = true,
-                    Font = new Font("微软雅黑", 9.5f, FontStyle.Regular),
-                    Text = string.IsNullOrEmpty(officialPath) ? "未找到官方客户端" : officialPath,
+                    Font = new Font("微软雅黑", 9.5f),
+                    Text = hasOfficial ? officialPath : "未找到国服官方客户端",
                     LinkColor = Color.DodgerBlue
+                };
+                Button btnOfficial = new Button
+                {
+                    Text = "启动国服官方版",
+                    Width = 170,
+                    Height = 36,
+                    Enabled = hasOfficial
                 };
 
                 LinkLabel linkWeGame = new LinkLabel
                 {
                     AutoSize = true,
-                    Font = new Font("微软雅黑", 9.5f, FontStyle.Regular),
-                    Text = string.IsNullOrEmpty(wegamePath) ? "未找到 WeGame 版" : wegamePath,
+                    Font = new Font("微软雅黑", 9.5f),
+                    Text = hasWeGame ? wegamePath : "未找到 WeGame 版",
                     LinkColor = Color.DodgerBlue
                 };
-
-                Button btnOfficial = new Button
-                {
-                    Text = "启动官方客户端",
-                    Width = 170,
-                    Height = 38,
-                    Enabled = !string.IsNullOrEmpty(officialPath)
-                };
-
                 Button btnWeGame = new Button
                 {
                     Text = "启动 WeGame 版",
                     Width = 170,
-                    Height = 38,
-                    Enabled = !string.IsNullOrEmpty(wegamePath)
+                    Height = 36,
+                    Enabled = hasWeGame
                 };
 
+                // 事件
+                linkIntl.LinkClicked += (s, e) => OpenFolder(intlPath);
                 linkOfficial.LinkClicked += (s, e) => OpenFolder(officialPath);
                 linkWeGame.LinkClicked += (s, e) => OpenFolder(wegamePath);
 
-                linkOfficial.Left = (containerPanel.Width - linkOfficial.PreferredWidth) / 2;
-                linkOfficial.Top = progress.Bottom + 15;
-
-                linkWeGame.Left = (containerPanel.Width - linkWeGame.PreferredWidth) / 2;
-                linkWeGame.Top = linkOfficial.Bottom + 8;
-
-                btnOfficial.Left = (containerPanel.Width - btnOfficial.Width * 2 - 30) / 2;
-                btnOfficial.Top = linkWeGame.Bottom + 15;
-
-                btnWeGame.Left = btnOfficial.Left + btnOfficial.Width + 30;
-                btnWeGame.Top = btnOfficial.Top;
-
-                containerPanel.Controls.Add(linkOfficial);
-                containerPanel.Controls.Add(linkWeGame);
-                containerPanel.Controls.Add(btnOfficial);
-                containerPanel.Controls.Add(btnWeGame);
-
+                btnIntl.Click += (s, e) =>
+                {
+                    helper.StartInternationalClient();
+                    if (hasIntl) helper.SaveInternationalPath(intlPath);
+                };
                 btnOfficial.Click += (s, e) =>
                 {
                     helper.StartOfficialClient();
-                    if (!string.IsNullOrEmpty(officialPath)) helper.SaveCustomPath(officialPath);
+                    if (hasOfficial) helper.SaveCustomPath(officialPath);
                 };
-
                 btnWeGame.Click += (s, e) =>
                 {
                     helper.StartWeGameClient();
-                    if (!string.IsNullOrEmpty(wegamePath)) helper.SaveCustomPath(wegamePath);
+                    if (hasWeGame) helper.SaveCustomPath(null, wegamePath);
                 };
+
+                int top = progress.Bottom + 18;
+                int centerX = containerPanel.Width / 2;
+                const int btnGap = 40;   // 两个按钮之间的间距
+
+                // ========== 1. 外服（垂直：路径 → 按钮） ==========
+                if (hasIntl)
+                {
+                    linkIntl.Left = Math.Max(10, (containerPanel.Width - linkIntl.PreferredWidth) / 2);
+                    linkIntl.Top = top;
+                    containerPanel.Controls.Add(linkIntl);
+
+                    btnIntl.Left = centerX - btnIntl.Width / 2;
+                    btnIntl.Top = linkIntl.Bottom + 6;
+                    containerPanel.Controls.Add(btnIntl);
+
+                    top = btnIntl.Bottom + 20;   // 和外服下面内容隔开一点
+                }
+
+                // ========== 2. 国服（路径上下排列，按钮左右排列） ==========
+                if (hasChina)
+                {
+                    // 路径1（官方）
+                    if (hasOfficial)
+                    {
+                        linkOfficial.Left = Math.Max(10, (containerPanel.Width - linkOfficial.PreferredWidth) / 2);
+                        linkOfficial.Top = top;
+                        containerPanel.Controls.Add(linkOfficial);
+                        top = linkOfficial.Bottom + 4;
+                    }
+
+                    // 路径2（WeGame）
+                    if (hasWeGame)
+                    {
+                        linkWeGame.Left = Math.Max(10, (containerPanel.Width - linkWeGame.PreferredWidth) / 2);
+                        linkWeGame.Top = top;
+                        containerPanel.Controls.Add(linkWeGame);
+                        top = linkWeGame.Bottom + 8;
+                    }
+
+                    // 按钮行（左右隔开）
+                    if (hasOfficial && hasWeGame)
+                    {
+                        // 两个都有 → 左右排列
+                        int totalBtnWidth = btnOfficial.Width + btnGap + btnWeGame.Width;
+                        int startX = centerX - totalBtnWidth / 2;
+
+                        btnOfficial.Left = startX;
+                        btnOfficial.Top = top;
+                        containerPanel.Controls.Add(btnOfficial);
+
+                        btnWeGame.Left = startX + btnOfficial.Width + btnGap;
+                        btnWeGame.Top = top;
+                        containerPanel.Controls.Add(btnWeGame);
+                    }
+                    else if (hasOfficial)
+                    {
+                        // 只有官方
+                        btnOfficial.Left = centerX - btnOfficial.Width / 2;
+                        btnOfficial.Top = top;
+                        containerPanel.Controls.Add(btnOfficial);
+                    }
+                    else if (hasWeGame)
+                    {
+                        // 只有 WeGame
+                        btnWeGame.Left = centerX - btnWeGame.Width / 2;
+                        btnWeGame.Top = top;
+                        containerPanel.Controls.Add(btnWeGame);
+                    }
+                }
+
+                // ========== 3. 都没有 ==========
+                if (!hasIntl && !hasChina)
+                {
+                    Label noClient = new Label
+                    {
+                        Text = "未检测到任何客户端，请手动启动游戏后再试",
+                        AutoSize = true,
+                        Font = new Font("微软雅黑", 9.5f),
+                        ForeColor = Color.Gray
+                    };
+                    noClient.Left = (containerPanel.Width - noClient.PreferredWidth) / 2;
+                    noClient.Top = progress.Bottom + 20;
+                    containerPanel.Controls.Add(noClient);
+                }
+
+                // 动态高度
+                int maxBottom = 0;
+                foreach (Control c in containerPanel.Controls)
+                    maxBottom = Math.Max(maxBottom, c.Bottom);
+
+                containerPanel.Height = Math.Max(280, maxBottom + 20);
             }
 
             return containerPanel;

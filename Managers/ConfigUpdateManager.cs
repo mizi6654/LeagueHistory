@@ -54,37 +54,81 @@ namespace League.Managers
                 string localVerStr = VersionInfo.GetLocalVersion();
                 var localVer = VersionInfo.Parse(localVerStr);
 
-                // 调用 GitHub API 获取 latest release
-                string json = await http.GetStringAsync(
-                    "https://api.github.com/repos/mizi6654/LeagueHistory/releases/latest");
+                // 优先 Gitee，失败再试 GitHub
+                string[] apiUrls =
+                {
+                    "https://gitee.com/api/v5/repos/annals-code/LeagueHistory-Update/releases/latest",
+                    "https://api.github.com/repos/mizi6654/LeagueHistory/releases/latest"
+                };
 
-                var release = JObject.Parse(json);
+                JObject release = null;
+                string sourceName = "";
+
+                foreach (var url in apiUrls)
+                {
+                    try
+                    {
+                        string json = await http.GetStringAsync(url);
+                        release = JObject.Parse(json);
+                        sourceName = url.Contains("gitee.com") ? "Gitee" : "GitHub";
+                        Debug.WriteLine($"[自动更新] 成功从 {sourceName} 获取到最新版本信息");
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[自动更新] {url} 请求失败: {ex.Message}");
+                    }
+                }
+
+                if (release == null)
+                {
+                    Debug.WriteLine("[自动更新] 所有更新源都无法访问，跳过更新检查");
+                    return;
+                }
 
                 string tag = release["tag_name"]?.ToString() ?? "";
                 var remoteVer = VersionInfo.Parse(tag);
 
-                // 没有新版本
                 if (remoteVer <= localVer)
                 {
-                    Debug.WriteLine("[自动更新] 当前已是最新版本：" + localVerStr);
+                    Debug.WriteLine($"[自动更新] 当前已是最新版本：{localVerStr}（来源：{sourceName}）");
                     return;
                 }
 
                 string changelog = release["body"]?.ToString()?.Replace("\r\n", "\n") ?? "无更新日志";
                 string releaseName = release["name"]?.ToString() ?? tag;
 
-                // 找 zip 资源（你每次只上传一个 zip，名字随意，只要后缀是 .zip）
+                // 找 zip 资源（兼容 GitHub 和 Gitee）
+                // 优先找真正上传的安装包，排除 Gitee 自动生成的源码包
                 string zipUrl = null;
                 var assets = release["assets"] as JArray;
                 if (assets != null)
                 {
+                    // 第一轮：优先找名字里包含 "League" 的 zip（你上传的那个）
                     foreach (var asset in assets)
                     {
                         string name = asset["name"]?.ToString() ?? "";
-                        if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                        if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) &&
+                            name.Contains("League", StringComparison.OrdinalIgnoreCase))
                         {
-                            zipUrl = asset["browser_download_url"]?.ToString();
+                            zipUrl = asset["browser_download_url"]?.ToString()
+                                  ?? asset["url"]?.ToString();
                             break;
+                        }
+                    }
+
+                    // 第二轮：如果没找到，再随便取一个 .zip（兜底）
+                    if (string.IsNullOrEmpty(zipUrl))
+                    {
+                        foreach (var asset in assets)
+                        {
+                            string name = asset["name"]?.ToString() ?? "";
+                            if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                            {
+                                zipUrl = asset["browser_download_url"]?.ToString()
+                                      ?? asset["url"]?.ToString();
+                                break;
+                            }
                         }
                     }
                 }
@@ -99,6 +143,7 @@ namespace League.Managers
                 // 弹窗确认
                 string msg = $"发现新版本：{releaseName}\n\n" +
                              $"当前版本：{localVerStr}\n" +
+                             $"更新来源：{sourceName}\n\n" +
                              $"更新内容：\n{changelog}\n\n" +
                              $"是否立即下载并自动更新？（更新后程序将自动重启）";
 
@@ -108,17 +153,15 @@ namespace League.Managers
                     return;
                 }
 
-                // 开始更新
-                await PerformAutoUpdate(zipUrl, tag.TrimStart('v', 'V'));
+                await PerformAutoUpdate(zipUrl, tag.TrimStart('v', 'V'), sourceName);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("[自动更新检查失败] " + ex.Message);
-                // 不打扰用户，只在调试输出里看得到
             }
         }
 
-        private async Task PerformAutoUpdate(string zipUrl, string newVersion)
+        private async Task PerformAutoUpdate(string zipUrl, string newVersion, string sourceName = "Gitee / GitHub")
         {
             string tempDir = Path.Combine(Path.GetTempPath(), "LeagueUpdaterTemp");
             string zipPath = Path.Combine(tempDir, "update.zip");
@@ -127,11 +170,12 @@ namespace League.Managers
 
             try
             {
-                progressForm = new ProgressForm();
+                // 传入来源名称，实现动态显示
+                progressForm = new ProgressForm(sourceName);
                 progressForm.Owner = _mainForm;
                 progressForm.Show(_mainForm);
 
-                await Task.Delay(3000);
+                await Task.Delay(300);   // 稍微缩短一点初始延迟
 
                 await Task.Run(async () =>
                 {
@@ -143,7 +187,7 @@ namespace League.Managers
                     Directory.CreateDirectory(tempDir);
                     Directory.CreateDirectory(extractPath);
 
-                    // ==================== 下载部分（保持你现在的逻辑）====================
+                    // ==================== 下载部分 ====================
                     int retryCount = 0;
                     const int maxDownloadRetries = 3;
                     bool downloadSuccess = false;
@@ -182,18 +226,21 @@ namespace League.Managers
                                 {
                                     int percent = (int)((downloadedBytes * 100L) / totalBytes);
                                     progressForm.Invoke(() => progressForm.UpdateStatus(
-                                        $"从 GitHub 下载中... {percent}% ({downloadedBytes / 1024 / 1024} MB)\r\n" +
+                                        $"正在从 {sourceName} 下载中... {percent}%  ({downloadedBytes / 1024.0 / 1024.0:F1} MB)\r\n" +
                                         "（速度受网络影响，可能较慢，请勿关闭窗口）", percent));
                                 }
                             }
+
                             downloadSuccess = true;
                         }
                         catch (Exception ex) when (ex is HttpRequestException || ex is IOException)
                         {
                             retryCount++;
                             if (retryCount >= maxDownloadRetries) throw;
+
                             progressForm.Invoke(() => progressForm.UpdateStatus(
-                                $"下载失败，正在第 {retryCount}/{maxDownloadRetries} 次重试...\r\n", null));
+                                $"下载失败，正在第 {retryCount}/{maxDownloadRetries} 次重试...\r\n" +
+                                $"来源：{sourceName}", null));
                             await Task.Delay(3000 * retryCount);
                         }
                     }
