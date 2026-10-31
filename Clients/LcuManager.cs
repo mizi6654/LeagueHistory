@@ -254,42 +254,25 @@ namespace League.Clients
         {
             try
             {
-                var ux = Process.GetProcessesByName("LeagueClientUx").FirstOrDefault();
-                if (ux != null)
+                if (ProcessCommandLineHelper.TryFindLcuCredentials(
+                        out string port, out string token, out string region, out string rso, out int pid))
                 {
-                    string cmd = GetCommandLine(ux);
-                    if (!string.IsNullOrEmpty(cmd))
-                    {
-                        string port = Clean(ExtractArgument(cmd, "--app-port="));
-                        string token = Clean(ExtractArgument(cmd, "--remoting-auth-token="));
+                    _port = port;
+                    _token = token;
 
-                        // 新增区服
-                        string region = Clean(ExtractArgument(cmd, "--region="));
-                        string rso = Clean(ExtractArgument(cmd, "--rso-platform-id="));
-                        if (string.IsNullOrEmpty(rso))
-                            rso = Clean(ExtractArgument(cmd, "--platform-id="));
+                    if (!string.IsNullOrEmpty(region)) Region = region;
+                    if (!string.IsNullOrEmpty(rso)) RsoPlatformId = rso;
+                    SgpServerId = SgpServerConfig.BuildSgpServerId(Region, RsoPlatformId);
 
-                        if (!string.IsNullOrEmpty(port) && !string.IsNullOrEmpty(token))
-                        {
-                            _port = port;
-                            _token = token;
-
-                            if (!string.IsNullOrEmpty(region)) Region = region;
-                            if (!string.IsNullOrEmpty(rso)) RsoPlatformId = rso;
-                            SgpServerId = SgpServerConfig.BuildSgpServerId(Region, RsoPlatformId);
-
-                            Debug.WriteLine(
-                                $"[LcuManager] 凭证←Ux Port={_port}, Region={Region}, Rso={RsoPlatformId}, SgpId={SgpServerId}");
-                            return Task.FromResult(true);
-                        }
-                    }
+                    Debug.WriteLine(
+                        $"[LcuManager] 凭证←Ux(PID={pid}) Port={_port}, Region={Region}, Rso={RsoPlatformId}, SgpId={SgpServerId}");
+                    return Task.FromResult(true);
                 }
 
                 if (LoadCache(out string cp, out string ct))
                 {
                     _port = cp;
                     _token = ct;
-                    // 缓存里若以后存了 region 可一并恢复；现在至少 port/token 能连
                     Debug.WriteLine($"[LcuManager] 凭证←缓存 Port={_port}");
                     return Task.FromResult(true);
                 }
@@ -339,12 +322,26 @@ namespace League.Clients
 
             DisconnectSocketOnly();
             _ws = new ClientWebSocket();
+
+            // 与 LcuClient 的 UseProxy=false 对齐：
+            // ClientWebSocket 默认走系统代理；Proxy=null 才会真正禁用（.NET 运行时行为）
+            // 避免系统代理指向失效的 127.0.0.1:7897 时，WS 建连失败
+            _ws.Options.Proxy = null;
+
             _ws.Options.RemoteCertificateValidationCallback = (s, c, ch, e) => true;
             _ws.Options.SetRequestHeader("Authorization",
                 "Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes($"riot:{_token}")));
 
             var uri = new Uri($"wss://127.0.0.1:{_port}/");
-            await _ws.ConnectAsync(uri, _cts.Token);
+            try
+            {
+                await _ws.ConnectAsync(uri, _cts.Token);
+            }
+            catch (Exception ex)
+            {
+                // 区分 HTTP 已过、WS 失败，方便以后看日志
+                throw new Exception($"WebSocket 建连失败: {ex.Message}", ex);
+            }
 
             // 订阅 phase（可按需加更多事件）
             await SendWsAsync("[5,\"OnJsonApiEvent_lol-gameflow_v1_gameflow-phase\"]");
@@ -639,33 +636,6 @@ namespace League.Clients
             {
                 return false;
             }
-        }
-
-        private static string Clean(string value) =>
-            value?.Trim().Trim('"', '\'', ' ', '\r', '\n');
-
-        private string GetCommandLine(Process process)
-        {
-            try
-            {
-                using var searcher = new ManagementObjectSearcher(
-                    $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {process.Id}");
-                using var collection = searcher.Get();
-                foreach (ManagementObject obj in collection)
-                    return obj["CommandLine"]?.ToString() ?? "";
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[LcuManager] 读命令行失败: {ex.Message}");
-            }
-            return "";
-        }
-
-        private string ExtractArgument(string cmdLine, string key)
-        {
-            if (string.IsNullOrEmpty(cmdLine)) return null;
-            var match = Regex.Match(cmdLine, Regex.Escape(key) + "([^ ]+)");
-            return match.Success ? match.Groups[1].Value : null;
         }
 
         public void Dispose()
