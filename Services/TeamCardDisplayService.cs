@@ -292,9 +292,34 @@ namespace League.Services
                 JArray myTeam = isInTeamOne ? teamOne : teamTwo;
                 int myRow = isInTeamOne ? 0 : 1;
 
+                //if (enemyTeam == null || enemyTeam.Count == 0)
+                //{
+                //    Debug.WriteLine("[ShowEnemyTeamCards] 敌方队伍为空");
+                //    return;
+                //}
                 if (enemyTeam == null || enemyTeam.Count == 0)
                 {
-                    Debug.WriteLine("[ShowEnemyTeamCards] 敌方队伍为空");
+                    // 只有人机模式才需要特殊处理（teamTwo 经常是空的）
+                    bool isBotQueue = queueId == 890 || queueId == 830 || queueId == 840
+                                   || queueId == 850 || queueId == 870 || queueId == 880;
+
+                    if (!isBotQueue)
+                    {
+                        Debug.WriteLine("[ShowEnemyTeamCards] 敌方队伍为空（非人机），直接返回");
+                        return;
+                    }
+
+                    Debug.WriteLine("[ShowEnemyTeamCards] 人机模式敌方为空，仅做我方轻量补全（不重画整个面板）");
+
+                    // 只补全我方隐藏/失败的卡片，不强制重建所有卡片
+                    if (myTeam != null && myTeam.Count > 0)
+                    {
+                        _form._cachedMyTeam = myTeam;
+                        await _cardManager.ValidateAndCompleteAllCards(teamOne, teamTwo ?? new JArray());
+                        await _cardManager.CompleteMyTeamHiddenOrUnknownAsync(myTeam, myRow);
+                    }
+
+                    // 注意：这里不要调用 ShowBothTeamsFromGameSessionAsync，也不要手动 Release
                     return;
                 }
 
